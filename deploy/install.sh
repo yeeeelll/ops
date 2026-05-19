@@ -26,13 +26,37 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
   exit 1
 fi
 
-# Locate node binary for the target user
-NODE_BIN="$(sudo -u "$APP_USER" -i bash -c 'command -v node' || true)"
+# Locate node binary. Priority:
+#   1) NODE_BIN env var (sudo -E or explicit assignment)
+#   2) user's login shell PATH (covers nvm if .bashrc sources nvm.sh)
+#   3) common nvm / 宝塔 paths
+NODE_BIN="${NODE_BIN:-}"
+
 if [[ -z "$NODE_BIN" ]]; then
-  echo "node not found in PATH for user $APP_USER." >&2
-  echo "If you use 宝塔 PM2, look under /www/server/nodejs/<version>/bin/node" >&2
-  echo "and either symlink it or set NODE_BIN manually:" >&2
-  echo "  NODE_BIN=/www/server/nodejs/v20.19.6/bin/node sudo bash deploy/install.sh" >&2
+  NODE_BIN="$(sudo -u "$APP_USER" -i bash -lc 'command -v node' 2>/dev/null || true)"
+fi
+
+if [[ -z "$NODE_BIN" ]]; then
+  for candidate in \
+    "/root/.nvm/versions/node"/*/bin/node \
+    "/home/$APP_USER/.nvm/versions/node"/*/bin/node \
+    /www/server/nodejs/*/bin/node \
+    /usr/local/bin/node \
+    /usr/bin/node
+  do
+    if [[ -x "$candidate" ]]; then
+      NODE_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
+  echo "node binary not found." >&2
+  echo "Pass NODE_BIN explicitly, e.g.:" >&2
+  echo "  sudo NODE_BIN=/root/.nvm/versions/node/v20.20.2/bin/node bash deploy/install.sh" >&2
+  echo "Or create a symlink:" >&2
+  echo "  sudo ln -sf /root/.nvm/versions/node/v20.20.2/bin/node /usr/local/bin/node" >&2
   exit 1
 fi
 NODE_BIN_DIR="$(dirname "$NODE_BIN")"
