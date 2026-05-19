@@ -18,6 +18,7 @@ export interface CommandResult {
   text: string;
   newSessionId?: string;
   exit?: boolean;
+  clearScreen?: boolean;
 }
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => Promise<CommandResult>;
@@ -29,6 +30,7 @@ const handlers: Record<string, CommandHandler> = {
       '  /help              显示帮助',
       '  /quit  | /q        退出',
       '  /new               开启新会话',
+      '  /clear             清屏并开启新会话 (Telegram 仅起新会话)',
       '  /model             显示当前模型',
       '  /model <id>        切换模型 (例: /model deepseek/deepseek-v4-pro)',
       '  /model list [关键字]   列出模型, 可加关键字过滤',
@@ -49,6 +51,19 @@ const handlers: Record<string, CommandHandler> = {
     return {
       text: `已开启新会话\n  会话=${sess.id}\n  模型=${sess.model}`,
       newSessionId: sess.id,
+    };
+  },
+
+  clear: async (_, ctx) => {
+    const sess = getOrCreateSession(
+      ctx.channel,
+      `${ctx.channel}-${Date.now()}-${randomUUID().slice(0, 6)}`,
+      config.llm.model,
+    );
+    return {
+      text: `已清空并开启新会话\n  会话=${sess.id}\n  模型=${sess.model}`,
+      newSessionId: sess.id,
+      clearScreen: true,
     };
   },
 

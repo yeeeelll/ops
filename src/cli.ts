@@ -33,6 +33,9 @@ async function main(): Promise<void> {
         if (isCommand(input)) {
           try {
             const result = await handleCommand(input, { channel: 'cli', sessionId });
+            if (result.clearScreen) {
+              process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+            }
             process.stdout.write(`${result.text}\n\n`);
             if (result.newSessionId) sessionId = result.newSessionId;
             if (result.exit) {
