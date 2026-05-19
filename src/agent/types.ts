@@ -15,6 +15,7 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  reasoning?: string;
   reasoning_content?: string;
 }
 
@@ -60,6 +61,7 @@ export interface ChatCompletionResponse {
     message: {
       role: 'assistant';
       content: string | null;
+      reasoning?: string | null;
       reasoning_content?: string | null;
       tool_calls?: ToolCall[];
     };

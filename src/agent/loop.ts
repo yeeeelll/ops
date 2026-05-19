@@ -90,11 +90,12 @@ export async function runTurn(opts: RunOptions): Promise<RunResult> {
     if (!choice) throw new Error('LLM returned no choices');
     const assistant = choice.message;
 
+    const reasoningText = assistant.reasoning_content ?? assistant.reasoning ?? null;
     const assistantMsg: ChatMessage = {
       role: 'assistant',
       content: assistant.content ?? '',
       ...(assistant.tool_calls ? { tool_calls: assistant.tool_calls } : {}),
-      ...(assistant.reasoning_content ? { reasoning_content: assistant.reasoning_content } : {}),
+      ...(reasoningText ? { reasoning: reasoningText, reasoning_content: reasoningText } : {}),
     };
     appendMessage(sessionId, assistantMsg);
     history = [...history, assistantMsg];
