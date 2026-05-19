@@ -1,0 +1,46 @@
+[Unit]
+Description=AI Ops Agent - Telegram Bot
+Documentation=https://github.com/your-repo/ai-ops-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__APP_DIR__
+
+# Node binary path. With 宝塔 PM2 plugin Node lives at /www/server/nodejs/<ver>/bin
+# Replace __NODE_BIN__ with: which node (run on server as the target user)
+Environment="PATH=__NODE_BIN_DIR__:/usr/local/bin:/usr/bin:/bin"
+Environment="NODE_ENV=production"
+EnvironmentFile=__APP_DIR__/.env
+
+ExecStart=__NODE_BIN__ --import tsx __APP_DIR__/src/bot.ts
+
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+# Logging: capture stdout/stderr into journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-agent-bot
+
+# Security hardening (relax if you need broader filesystem access via tools)
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# Resource limits
+LimitNOFILE=4096
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
