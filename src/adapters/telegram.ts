@@ -32,12 +32,10 @@ export function buildBot(): Telegraf {
   });
 
   bot.start(async (ctx) => {
-    const sess = sessionFor(ctx);
+    sessionFor(ctx);
     await ctx.reply(
       [
         '运维 Agent 已就绪。',
-        `会话 ID: ${sess.id}`,
-        `当前模型: ${sess.model}`,
         '直接发消息开始对话, 输入 /help 查看命令。',
       ].join('\n'),
     );
