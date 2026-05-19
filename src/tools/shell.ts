@@ -17,12 +17,23 @@ const DANGEROUS_PATTERNS: RegExp[] = [
 ];
 
 const READ_ONLY_BINARIES = new Set([
-  'ls', 'cat', 'tail', 'head', 'grep', 'awk', 'sed', 'wc', 'find', 'tree',
-  'ps', 'top', 'htop', 'free', 'df', 'du', 'uptime', 'who', 'w',
-  'date', 'whoami', 'hostname', 'uname', 'pwd', 'echo', 'env', 'printenv',
+  // text + filesystem inspection
+  'ls', 'cat', 'tail', 'head', 'grep', 'egrep', 'fgrep', 'zgrep', 'zcat',
+  'awk', 'sed', 'wc', 'find', 'tree', 'sort', 'uniq', 'cut', 'tr', 'xxd', 'md5sum', 'sha256sum',
   'stat', 'file', 'readlink', 'realpath',
-  'systemctl', 'journalctl', 'docker', 'git', 'curl', 'wget',
-  'netstat', 'ss', 'ip', 'dig', 'nslookup', 'ping', 'traceroute',
+  // host + process state
+  'ps', 'top', 'htop', 'free', 'df', 'du', 'uptime',
+  'date', 'whoami', 'hostname', 'uname', 'pwd', 'echo', 'env', 'printenv',
+  // sessions / login / security audit
+  'who', 'users', 'w', 'last', 'lastb', 'lastlog', 'id', 'groups', 'getent',
+  // services / containers / scm
+  'systemctl', 'journalctl', 'docker', 'git',
+  // http + dns + net
+  'curl', 'wget', 'netstat', 'ss', 'ip', 'dig', 'nslookup', 'ping', 'traceroute', 'host',
+  // open files + firewall + fail2ban
+  'lsof', 'iptables', 'ip6tables', 'nft', 'ufw', 'fail2ban-client',
+  // package + kernel info
+  'dpkg', 'rpm', 'lsmod', 'sysctl',
 ]);
 
 function firstWord(cmd: string): string {
@@ -54,6 +65,37 @@ function isLikelyReadOnly(cmd: string): boolean {
   }
   if (base === 'git') {
     return /^\s*git\s+(status|log|diff|show|rev-parse|branch|remote\s+-v|config\s+--get)\b/.test(cmd);
+  }
+  if (base === 'iptables' || base === 'ip6tables') {
+    return /^\s*ip6?tables\s+(-L|--list|-S|--list-rules|-n|-vn|-vL|--numeric)/.test(cmd) &&
+      !/(-A|-D|-I|-R|-F|-Z|-X|-P|--append|--delete|--insert|--flush|--policy)/.test(cmd);
+  }
+  if (base === 'nft') {
+    return /^\s*nft\s+(list|show)\b/.test(cmd);
+  }
+  if (base === 'ufw') {
+    return /^\s*ufw\s+(status|show)\b/.test(cmd);
+  }
+  if (base === 'fail2ban-client') {
+    return /^\s*fail2ban-client\s+(status|ping|get|version)\b/.test(cmd) &&
+      !/(set|reload|restart|stop|start|unban|ban|add|del)\b/.test(cmd);
+  }
+  if (base === 'sysctl') {
+    return /^\s*sysctl\s+(-a|-n|[a-z0-9._-]+\s*$)/.test(cmd) && !/\s-w\b|=/.test(cmd);
+  }
+  if (base === 'dpkg') {
+    return /^\s*dpkg\s+(-l|--list|-s|--status|-L|--listfiles|-S|--search)\b/.test(cmd);
+  }
+  if (base === 'rpm') {
+    return /^\s*rpm\s+(-q|--query|-V|--verify)\b/.test(cmd) && !/(-e|--erase|-U|-i|--upgrade|--install)\b/.test(cmd);
+  }
+  if (base === 'curl') {
+    // 默认 GET 安全, 拒掉显式写方法以及 --upload-file
+    return !/\s(-X|--request)\s+(POST|PUT|DELETE|PATCH)\b/i.test(cmd) &&
+      !/\s(-T|--upload-file)\b/.test(cmd);
+  }
+  if (base === 'wget') {
+    return !/--post-(data|file)|--method[= ]/i.test(cmd);
   }
   return true;
 }
