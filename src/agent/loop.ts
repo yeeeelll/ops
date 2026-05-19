@@ -9,8 +9,8 @@ import { config } from '../config.js';
 import { getToolSchemas, runTool } from '../tools/registry.js';
 import type { ChatMessage, ToolCall } from './types.js';
 
-const MAX_ITERATIONS = 10;
-const TOOL_RESULT_MAX_CHARS = 8_000;
+const MAX_ITERATIONS = Number(process.env.AGENT_MAX_ITERATIONS) || 25;
+const TOOL_RESULT_MAX_CHARS = Number(process.env.AGENT_TOOL_RESULT_MAX_CHARS) || 8_000;
 
 export interface RunOptions {
   sessionId: string;
@@ -163,8 +163,9 @@ export async function runTurn(opts: RunOptions): Promise<RunResult> {
   }
 
   if (iterations >= MAX_ITERATIONS) {
-    logger.warn({ sessionId }, 'agent loop reached MAX_ITERATIONS');
-    finalText = finalText || '(达到最大工具调用迭代次数, 已中止)';
+    logger.warn({ sessionId, max: MAX_ITERATIONS }, 'agent loop reached MAX_ITERATIONS');
+    const hint = `(已达到本轮最大工具调用次数 ${MAX_ITERATIONS}, 中止。可调高 AGENT_MAX_ITERATIONS 或让我"继续"接着排查)`;
+    finalText = finalText ? `${finalText}\n\n${hint}` : hint;
   }
 
   return { finalText, iterations, toolCalls: toolCallsTotal, servedModel };
