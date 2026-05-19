@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS messages (
   tool_calls   TEXT,
   tool_call_id TEXT,
   name         TEXT,
+  reasoning_content TEXT,
   created_at   INTEGER NOT NULL
 );
 
@@ -50,6 +51,17 @@ CREATE INDEX IF NOT EXISTS idx_audit_session
 `;
 
 db.exec(SCHEMA);
+
+function ensureColumn(table: string, column: string, type: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    logger.info({ table, column }, 'SQLite column added');
+  }
+}
+
+ensureColumn('messages', 'reasoning_content', 'TEXT');
+
 logger.info({ path: config.runtime.dbPath }, 'SQLite ready');
 
 export function now(): number {

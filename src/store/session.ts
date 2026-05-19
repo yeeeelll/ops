@@ -35,12 +35,13 @@ const getSessionStmt = db.prepare(
 );
 
 const insertMessage = db.prepare(
-  `INSERT INTO messages(session_id, role, content, tool_calls, tool_call_id, name, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  `INSERT INTO messages(session_id, role, content, tool_calls, tool_call_id, name, reasoning_content, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 );
 
 const loadMessages = db.prepare(
-  `SELECT role, content, tool_calls AS toolCalls, tool_call_id AS toolCallId, name
+  `SELECT role, content, tool_calls AS toolCalls, tool_call_id AS toolCallId, name,
+          reasoning_content AS reasoningContent
      FROM messages WHERE session_id = ? ORDER BY id ASC`,
 );
 
@@ -67,6 +68,7 @@ export function appendMessage(sessionId: string, msg: ChatMessage): void {
     msg.tool_calls ? JSON.stringify(msg.tool_calls) : null,
     msg.tool_call_id ?? null,
     msg.name ?? null,
+    msg.reasoning_content ?? null,
     now(),
   );
   touchSession.run(now(), sessionId);
@@ -88,6 +90,7 @@ export function loadHistory(sessionId: string): ChatMessage[] {
     toolCalls: string | null;
     toolCallId: string | null;
     name: string | null;
+    reasoningContent: string | null;
   }>;
   return rows.map((r) => ({
     role: r.role,
@@ -95,5 +98,6 @@ export function loadHistory(sessionId: string): ChatMessage[] {
     ...(r.toolCalls ? { tool_calls: JSON.parse(r.toolCalls) } : {}),
     ...(r.toolCallId ? { tool_call_id: r.toolCallId } : {}),
     ...(r.name ? { name: r.name } : {}),
+    ...(r.reasoningContent ? { reasoning_content: r.reasoningContent } : {}),
   }));
 }

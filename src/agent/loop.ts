@@ -94,6 +94,7 @@ export async function runTurn(opts: RunOptions): Promise<RunResult> {
       role: 'assistant',
       content: assistant.content ?? '',
       ...(assistant.tool_calls ? { tool_calls: assistant.tool_calls } : {}),
+      ...(assistant.reasoning_content ? { reasoning_content: assistant.reasoning_content } : {}),
     };
     appendMessage(sessionId, assistantMsg);
     history = [...history, assistantMsg];

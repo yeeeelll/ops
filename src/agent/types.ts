@@ -15,6 +15,7 @@ export interface ChatMessage {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  reasoning_content?: string;
 }
 
 export interface ToolDefinition {
@@ -59,6 +60,7 @@ export interface ChatCompletionResponse {
     message: {
       role: 'assistant';
       content: string | null;
+      reasoning_content?: string | null;
       tool_calls?: ToolCall[];
     };
     finish_reason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | string | null;
