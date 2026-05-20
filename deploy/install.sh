@@ -145,6 +145,29 @@ if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
   echo "  sudo NODE_BIN=/root/.nvm/versions/node/v20.20.2/bin/node bash deploy/install.sh" >&2
   exit 1
 fi
+
+# Verify the target user can actually exec the binary. Common failure:
+# nvm under /root which is mode 700 — aiops cannot traverse into it.
+if [[ "$APP_USER" != "root" ]] && ! sudo -u "$APP_USER" test -x "$NODE_BIN"; then
+  echo "User '$APP_USER' cannot exec $NODE_BIN (probably under /root with mode 700)." >&2
+  if [[ "$NODE_BIN" == /root/* ]]; then
+    LINK=/usr/local/bin/node
+    echo "Creating symlink $LINK -> $NODE_BIN and granting traverse-only access on /root/.nvm..." >&2
+    ln -sf "$NODE_BIN" "$LINK"
+    ln -sf "$(dirname "$NODE_BIN")/npm" /usr/local/bin/npm 2>/dev/null || true
+    ln -sf "$(dirname "$NODE_BIN")/npx" /usr/local/bin/npx 2>/dev/null || true
+    chmod o+x /root 2>/dev/null || true
+    if [[ -d /root/.nvm ]]; then
+      chmod -R o+rX /root/.nvm
+    fi
+    NODE_BIN="$LINK"
+  fi
+  if ! sudo -u "$APP_USER" test -x "$NODE_BIN"; then
+    echo "Still cannot exec. Install node under /home/$APP_USER/.nvm or pass NODE_BIN to a globally readable path." >&2
+    exit 1
+  fi
+fi
+
 NODE_BIN_DIR="$(dirname "$NODE_BIN")"
 
 echo "Detected:"
