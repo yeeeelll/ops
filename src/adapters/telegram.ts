@@ -68,9 +68,14 @@ export function buildBot(): Telegraf {
       const parts = stripped.split(/\s+/);
       const name = (parts[0] ?? '').toLowerCase();
       const args = parts.slice(1);
-      return runSlashCommand(ctx, name, args);
+      void runSlashCommand(ctx, name, args).catch((err) =>
+        logger.error({ err, name }, 'slash command crashed'),
+      );
+      return;
     }
-    return runAgentTurn(ctx, text);
+    void runAgentTurn(ctx, text).catch((err) =>
+      logger.error({ err, uid: ctx.from?.id }, 'agent turn crashed'),
+    );
   });
 
   bot.catch((err, ctx) => {
