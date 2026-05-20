@@ -1,0 +1,26 @@
+# Sudoers fragment for the AI Ops Agent dedicated user.
+# Installed by deploy/install.sh to /etc/sudoers.d/ai-agent (mode 0440).
+#
+# Placeholders:
+#   __USER__       - replaced with APP_USER (e.g. aiops)
+#   __SERVICES__   - replaced with the rendered Cmnd_Alias body
+#                    (one systemctl invocation per APPROVED_SERVICES entry)
+#
+# The user can ONLY run the commands listed below. Everything else still
+# needs root.
+
+Cmnd_Alias AIOPS_SERVICES = __SERVICES__
+
+Cmnd_Alias AIOPS_FS_LOCK = /usr/bin/chattr -i /*, \
+                           /usr/bin/chattr +i /*, \
+                           /bin/chattr -i /*, \
+                           /bin/chattr +i /*
+
+# Allow listing immutable status without password
+Cmnd_Alias AIOPS_FS_INSPECT = /usr/bin/lsattr /*, /bin/lsattr /*
+
+__USER__ ALL=(root) NOPASSWD: AIOPS_SERVICES, AIOPS_FS_LOCK, AIOPS_FS_INSPECT
+
+# Defaults for safety
+Defaults:__USER__ !requiretty
+Defaults:__USER__ env_keep += "AGENT_*"

@@ -61,17 +61,23 @@ registerTool({
       return { ok: false, content: 'unit 名含非法字符' };
     }
 
+    const useSudo = config.tools.useSudo;
+    const argv = useSudo ? ['-n', 'systemctl', action, unit] : ['systemctl', action, unit];
+    const bin = useSudo ? 'sudo' : 'systemctl';
+    const realArgv = useSudo ? argv : [action, unit];
+
     try {
-      const proc = await execa('systemctl', [action, unit], {
+      const proc = await execa(bin, realArgv, {
         timeout: 30_000,
         reject: false,
         all: true,
         stripFinalNewline: false,
       });
       const out = proc.all ?? `${proc.stdout ?? ''}${proc.stderr ?? ''}`;
+      const cmdEcho = `${useSudo ? 'sudo ' : ''}systemctl ${action} ${unit}`;
       return {
         ok: !proc.failed,
-        content: `$ systemctl ${action} ${unit}\n[exit=${proc.exitCode ?? 'n/a'}]\n${out || '(无输出)'}`,
+        content: `$ ${cmdEcho}\n[exit=${proc.exitCode ?? 'n/a'}]\n${out || '(无输出)'}`,
       };
     } catch (err) {
       return { ok: false, content: `执行失败: ${(err as Error).message}` };

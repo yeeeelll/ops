@@ -74,22 +74,37 @@ npm run cli
 
 ### 6. 安装 systemd 服务
 
+**推荐方式 (专用用户 + sudo 白名单)**:
+
+```bash
+sudo APP_USER=aiops bash deploy/install.sh
+```
+
+脚本会:
+1. 不存在则自动建系统用户 `aiops`
+2. 把 `/opt/ai-agent` 全部 chown 给 `aiops`, `.env` 设 600
+3. 渲染 `/etc/sudoers.d/ai-agent` (基于 `.env` 的 APPROVED_SERVICES 自动生成 systemctl 白名单 + chattr/lsattr)
+4. 用 `visudo -c` 校验后才安装
+5. 渲染 + 安装 systemd unit (`User=aiops`)
+6. `daemon-reload && enable && restart`
+
+**保持 root 运行** (兼容老部署):
+
 ```bash
 sudo bash deploy/install.sh
 ```
 
-脚本会:
-1. 自动检测 APP_DIR / APP_USER / node 路径
-2. 渲染 `deploy/ai-agent-bot.service` 模板
-3. 安装到 `/etc/systemd/system/ai-agent-bot.service`
-4. `systemctl daemon-reload && enable && restart`
-5. 打印状态
+`USE_SUDO=auto` 时:
+- 非 root 运行 → `service_op` 自动用 `sudo systemctl ...`
+- root 运行 → 直接 `systemctl ...`
 
 如果 node 路径自动检测失败:
 
 ```bash
-sudo NODE_BIN=/www/server/nodejs/v20.19.6/bin/node bash deploy/install.sh
+sudo APP_USER=aiops NODE_BIN=/root/.nvm/versions/node/v20.20.2/bin/node bash deploy/install.sh
 ```
+
+> **注意**: 改用专用用户后, 项目根目录的所有权变了。如果之前是 root 安装现在切到 aiops, 后续 `git pull` 要用 `sudo -u aiops git pull` 或在面板里改成 aiops 跑。
 
 ## 日常运维
 

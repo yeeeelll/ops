@@ -37,6 +37,9 @@ const Schema = z.object({
   WRITABLE_PATHS: z.string().default(''),
   APPROVED_SERVICES: z.string().default(''),
   APPROVED_GIT_REPOS: z.string().default(''),
+  USE_SUDO: z
+    .union([z.literal('true'), z.literal('false'), z.literal('auto')])
+    .default('auto'),
   SHELL_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   SHELL_KILL_GRACE_MS: z.coerce.number().int().positive().default(5_000),
   APPROVAL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
@@ -85,6 +88,8 @@ export const config = {
     writablePaths: csv(env.WRITABLE_PATHS).map((p) => path.resolve(p)),
     approvedServices: csv(env.APPROVED_SERVICES),
     approvedGitRepos: csv(env.APPROVED_GIT_REPOS).map((p) => path.resolve(p)),
+    useSudo:
+      env.USE_SUDO === 'true' ? true : env.USE_SUDO === 'false' ? false : process.getuid?.() !== 0,
     shellTimeoutMs: env.SHELL_TIMEOUT_MS,
     shellKillGraceMs: env.SHELL_KILL_GRACE_MS,
     approvalTimeoutMs: env.APPROVAL_TIMEOUT_MS,
