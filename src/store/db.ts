@@ -36,14 +36,16 @@ CREATE INDEX IF NOT EXISTS idx_messages_session
   ON messages(session_id, id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id   TEXT,
-  tool         TEXT NOT NULL,
-  args         TEXT NOT NULL,
-  result       TEXT,
-  status       TEXT NOT NULL,
-  duration_ms  INTEGER,
-  created_at   INTEGER NOT NULL
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id      TEXT,
+  tool            TEXT NOT NULL,
+  args            TEXT NOT NULL,
+  result          TEXT,
+  status          TEXT NOT NULL,
+  duration_ms     INTEGER,
+  approval        TEXT,
+  approval_reason TEXT,
+  created_at      INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_session
@@ -61,6 +63,8 @@ function ensureColumn(table: string, column: string, type: string): void {
 }
 
 ensureColumn('messages', 'reasoning_content', 'TEXT');
+ensureColumn('audit_log', 'approval', 'TEXT');
+ensureColumn('audit_log', 'approval_reason', 'TEXT');
 
 logger.info({ path: config.runtime.dbPath }, 'SQLite ready');
 

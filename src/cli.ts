@@ -6,6 +6,10 @@ import { listToolNames } from './tools/registry.js';
 import { getOrCreateSession } from './store/session.js';
 import { runTurn } from './agent/loop.js';
 import { handleCommand, isCommand, preloadModels } from './adapters/commands.js';
+import { registerApprovalProvider } from './agent/approval.js';
+import { CliApprovalProvider } from './adapters/approval-cli.js';
+
+registerApprovalProvider('cli', new CliApprovalProvider());
 
 async function main(): Promise<void> {
   const session = getOrCreateSession('cli', process.env.USER ?? 'local', config.llm.model);

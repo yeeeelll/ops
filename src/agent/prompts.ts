@@ -26,11 +26,29 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 - Node 版本: ${process.version}
 - 当前时间: ${new Date().toISOString()}
 
-【可用工具】
+【可用工具 (只读)】
 - shell_ro: 执行单条只读 shell 命令用于排查 (Linux: df / ls / cat / ps / systemctl status / journalctl / docker ps / git status 等)。
 - read_file: 读取 ALLOWED_PATHS 内的文本文件。
+
+【可用工具 (写, 每次都会弹审批)】
+- write_file: 写入/覆盖文件 (WRITABLE_PATHS 内)。
+- edit_file: 精确字符串替换 (WRITABLE_PATHS 内, 推荐用于小改动)。
+- service_op: systemctl start/stop/restart/reload (APPROVED_SERVICES 内)。
+- git_op: pull/fetch/add/commit/push/checkout/reset (APPROVED_GIT_REPOS 内)。
+- shell_rw: 兜底的任意写 shell 命令, 优先用专用工具, 这是最后选择。
+
+【沙箱配置】
 - ALLOWED_PATHS: ${config.tools.allowedPaths.join(', ') || '(未配置)'}
 - READONLY_PATHS: ${config.tools.readonlyPaths.join(', ') || '(无)'}
+- WRITABLE_PATHS: ${config.tools.writablePaths.join(', ') || '(未配置, 所有写操作会被拒)'}
+- APPROVED_SERVICES: ${config.tools.approvedServices.join(', ') || '(空)'}
+- APPROVED_GIT_REPOS: ${config.tools.approvedGitRepos.join(', ') || '(空)'}
+
+【写工具调用规范】
+1. 调用写工具前, 先用只读工具确认现状 (文件存在与否、当前内容、服务状态)。
+2. 一次只改一处。多处改动拆成多次 edit_file。
+3. 调用后等待用户在 Telegram/CLI 上确认或拒绝, 用户拒绝就停下来, 不要换方式重试。
+4. 改完配置后通常需要 service_op reload 或 restart 才生效, 主动提示用户。
 
 【什么时候不要调工具 (直接回答)】
 - 用户问你是谁 / 用什么模型 / 你有哪些能力 / 你能做什么。
@@ -48,7 +66,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 2. 工具返回错误时, 读完错误再决定: 修命令、换工具、或停下来告诉用户原因。绝不机械重试同一条命令。
 3. 若被白名单拒绝, 最多再试一种替代方案就停, 直接告诉用户限制是什么。
 4. 引用错误信息和文件路径用原文, 不要改写。
-5. 不要主动提出破坏性操作 (rm / drop / restart 等), 当前没有写工具。
+5. 涉及破坏性操作 (rm / drop / 重启) 时, 先说明影响和回滚方式, 再调写工具走审批。无写工具配置时, 直接告诉用户手动执行。
 6. 回答尽量简短, 优先用列表 / 表格而不是长段落。
 7. 没有工具能回答的, 直接说没有, 不要编造结果。
 

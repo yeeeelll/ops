@@ -3,17 +3,29 @@ import { message } from 'telegraf/filters';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { runTurn } from '../agent/loop.js';
-import { getOrCreateSession } from '../store/session.js';
+import { getOrCreateSession, getSession } from '../store/session.js';
 import { handleCommand, isCommand } from './commands.js';
 import { asPlainBlock, escapeHtml, splitMessage, trimForEdit } from './format.js';
+import { registerApprovalProvider } from '../agent/approval.js';
+import { attachApprovalHandlers, TelegramApprovalProvider } from './approval-telegram.js';
 
 const CHANNEL = 'telegram';
 const EDIT_THROTTLE_MS = 1100;
 
 const busy = new Map<number, boolean>();
 
+function chatIdForSession(sessionId: string): number | null {
+  const sess = getSession(sessionId);
+  if (!sess || sess.channel !== CHANNEL || !sess.externalId) return null;
+  const n = Number(sess.externalId);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function buildBot(): Telegraf {
   const bot = new Telegraf(config.telegram.token);
+
+  registerApprovalProvider(CHANNEL, new TelegramApprovalProvider(bot, chatIdForSession));
+  attachApprovalHandlers(bot, config.telegram.allowedUserIds);
 
   bot.use(async (ctx, next) => {
     const uid = ctx.from?.id;

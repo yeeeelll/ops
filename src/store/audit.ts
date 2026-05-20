@@ -1,8 +1,9 @@
 import { db, now } from './db.js';
 
 const insertAudit = db.prepare(
-  `INSERT INTO audit_log(session_id, tool, args, result, status, duration_ms, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  `INSERT INTO audit_log(session_id, tool, args, result, status, duration_ms,
+                         approval, approval_reason, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 );
 
 export interface AuditEntry {
@@ -12,6 +13,8 @@ export interface AuditEntry {
   result: string | null;
   status: 'ok' | 'error' | 'denied';
   durationMs: number;
+  approval?: 'none' | 'approved' | 'denied' | 'timeout';
+  approvalReason?: string | null;
 }
 
 export function audit(entry: AuditEntry): void {
@@ -22,6 +25,8 @@ export function audit(entry: AuditEntry): void {
     entry.result,
     entry.status,
     entry.durationMs,
+    entry.approval ?? 'none',
+    entry.approvalReason ?? null,
     now(),
   );
 }

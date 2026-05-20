@@ -24,8 +24,22 @@ export function checkPath(input: string, requireWrite = false): PathCheck {
     };
   }
   const readonly = config.tools.readonlyPaths.some((root) => isInside(resolved, root));
-  if (requireWrite && readonly) {
-    return { ok: false, resolved, readonly, reason: `path is read-only: ${resolved}` };
+  if (requireWrite) {
+    if (readonly) {
+      return { ok: false, resolved, readonly, reason: `path is read-only: ${resolved}` };
+    }
+    const writableRoots = config.tools.writablePaths;
+    if (writableRoots.length > 0) {
+      const inWritable = writableRoots.some((root) => isInside(resolved, root));
+      if (!inWritable) {
+        return {
+          ok: false,
+          resolved,
+          readonly: true,
+          reason: `path outside WRITABLE_PATHS: ${resolved}`,
+        };
+      }
+    }
   }
   return { ok: true, resolved, readonly };
 }

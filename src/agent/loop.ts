@@ -129,13 +129,16 @@ export async function runTurn(opts: RunOptions): Promise<RunResult> {
         ok = r.ok;
         const t = truncate(r.content);
         resultText = t.text;
+        const denied = r.approval === 'denied' || r.approval === 'timeout';
         audit({
           sessionId,
           tool: call.function.name,
           args: parsedArgs,
           result: resultText.slice(0, 4000),
-          status: r.ok ? 'ok' : 'error',
+          status: denied ? 'denied' : r.ok ? 'ok' : 'error',
           durationMs: Date.now() - started,
+          approval: r.approval,
+          approvalReason: r.approvalReason ?? null,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

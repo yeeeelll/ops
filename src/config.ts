@@ -34,8 +34,12 @@ const Schema = z.object({
 
   ALLOWED_PATHS: z.string().default(''),
   READONLY_PATHS: z.string().default(''),
+  WRITABLE_PATHS: z.string().default(''),
+  APPROVED_SERVICES: z.string().default(''),
+  APPROVED_GIT_REPOS: z.string().default(''),
   SHELL_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   SHELL_KILL_GRACE_MS: z.coerce.number().int().positive().default(5_000),
+  APPROVAL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 const parsed = Schema.safeParse(process.env);
@@ -78,8 +82,12 @@ export const config = {
   tools: {
     allowedPaths: csv(env.ALLOWED_PATHS).map((p) => path.resolve(p)),
     readonlyPaths: csv(env.READONLY_PATHS).map((p) => path.resolve(p)),
+    writablePaths: csv(env.WRITABLE_PATHS).map((p) => path.resolve(p)),
+    approvedServices: csv(env.APPROVED_SERVICES),
+    approvedGitRepos: csv(env.APPROVED_GIT_REPOS).map((p) => path.resolve(p)),
     shellTimeoutMs: env.SHELL_TIMEOUT_MS,
     shellKillGraceMs: env.SHELL_KILL_GRACE_MS,
+    approvalTimeoutMs: env.APPROVAL_TIMEOUT_MS,
   },
 } as const;
 

@@ -24,6 +24,10 @@ export interface ToolDefinition {
   description: string;
   parameters: Record<string, unknown>;
   handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<ToolResult>;
+  dangerous?: boolean;
+  confirm?: (
+    args: Record<string, unknown>,
+  ) => Promise<{ summary: string; details?: string }> | { summary: string; details?: string };
 }
 
 export interface ToolContext {
