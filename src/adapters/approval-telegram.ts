@@ -76,13 +76,14 @@ export function attachApprovalHandlers(bot: Telegraf, allowedUserIds: Set<number
       ctx.callbackQuery && 'data' in ctx.callbackQuery
         ? (ctx.callbackQuery.data ?? '')
         : '';
+    const uid = ctx.from?.id;
+    logger.info({ data, uid, pendingSize: pending.size }, 'callback_query received');
     if (!data.startsWith('appr:')) return;
     const parts = data.split(':');
     const verdict = parts[1];
     const reqId = parts[2];
     if (!reqId) return;
 
-    const uid = ctx.from?.id;
     if (!uid || !allowedUserIds.has(uid)) {
       await ctx.answerCbQuery('未授权');
       return;
@@ -90,6 +91,7 @@ export function attachApprovalHandlers(bot: Telegraf, allowedUserIds: Set<number
 
     const req = pending.get(reqId);
     if (!req) {
+      logger.warn({ reqId, pendingKeys: [...pending.keys()] }, 'callback for unknown reqId');
       await ctx.answerCbQuery('请求已过期');
       return;
     }

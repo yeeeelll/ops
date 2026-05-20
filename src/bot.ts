@@ -39,6 +39,7 @@ async function main(): Promise<void> {
 
   await bot.launch({
     dropPendingUpdates: true,
+    allowedUpdates: ['message', 'callback_query'],
   });
 
   logger.warn('Telegram bot stopped');
