@@ -28,15 +28,18 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=ai-agent-bot
 
-# Security hardening (relax if you need broader filesystem access via tools)
-NoNewPrivileges=true
+# Security hardening.
+# NoNewPrivileges and RestrictSUIDSGID are intentionally OFF: agent uses
+# `sudo` with a strict NOPASSWD sudoers whitelist (systemctl + chattr/lsattr)
+# for service_op / file-lock operations. Setuid is required for sudo to work.
+# Authorization is enforced by the sudoers Cmnd_Alias list, not by systemd.
+NoNewPrivileges=false
 ProtectSystem=full
 ProtectHome=read-only
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-RestrictSUIDSGID=true
 
 # Resource limits
 LimitNOFILE=4096
