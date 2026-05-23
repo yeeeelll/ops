@@ -17,6 +17,48 @@ function expandUnitName(raw: string): string | null {
   return raw;
 }
 
+interface UnitHealth {
+  ok: boolean;
+  state: string;
+  via: 'systemd' | 'sysv' | 'none';
+}
+
+/**
+ * Check unit liveness with a two-layer probe.
+ *
+ * 1. `systemctl is-active`. Returns active for native systemd units.
+ * 2. SysV init.d fallback (`service <unit> status`). 宝塔面板 installs
+ *    nginx / redis / mysql via SysV scripts that daemonize themselves;
+ *    the auto-generated systemd unit reports inactive even when the
+ *    process is healthy. Treat exit 0 from `service <name> status` as
+ *    confirmation the service is up.
+ */
+async function checkUnitHealth(unit: string): Promise<UnitHealth> {
+  const sd = await execa('systemctl', ['is-active', unit], {
+    timeout: SYSTEMCTL_TIMEOUT_MS,
+    reject: false,
+  });
+  const sdState = (sd.stdout ?? '').trim();
+  if (sdState === 'active') {
+    return { ok: true, state: 'active', via: 'systemd' };
+  }
+
+  const sysvName = unit.replace(/\.service$/, '');
+  try {
+    const sv = await execa('service', [sysvName, 'status'], {
+      timeout: SYSTEMCTL_TIMEOUT_MS,
+      reject: false,
+    });
+    if (sv.exitCode === 0) {
+      return { ok: true, state: 'active (SysV)', via: 'sysv' };
+    }
+  } catch (err) {
+    logger.debug({ err, unit }, 'sysv service status probe failed');
+  }
+
+  return { ok: false, state: sdState || 'inactive', via: 'systemd' };
+}
+
 const systemdCheck: Check = {
   name: 'systemd',
   async run() {
@@ -25,24 +67,21 @@ const systemdCheck: Check = {
       const unit = expandUnitName(raw);
       if (!unit) continue;
       try {
-        const proc = await execa('systemctl', ['is-active', unit], {
-          timeout: SYSTEMCTL_TIMEOUT_MS,
-          reject: false,
-        });
-        const state = (proc.stdout ?? '').trim();
-        if (state !== 'active') {
+        const health = await checkUnitHealth(unit);
+        if (!health.ok) {
           alerts.push({
             fingerprint: `systemd:${unit}`,
-            severity: state === 'failed' ? 'critical' : 'warning',
-            title: `系统服务 ${unit} 状态异常: ${state || 'inactive'}`,
+            severity: health.state === 'failed' ? 'critical' : 'warning',
+            title: `系统服务 ${unit} 状态异常: ${health.state}`,
             message:
               `服务: ${unit}\n` +
-              `当前状态: ${state || '(无状态)'}\n` +
+              `当前状态: ${health.state}\n` +
+              `已尝试: systemctl + service (SysV) 均未检测到运行\n` +
               `排查命令: journalctl -u ${unit} -n 30 --no-pager`,
           });
         }
       } catch (err) {
-        logger.debug({ err, unit }, 'systemctl is-active failed');
+        logger.debug({ err, unit }, 'unit health check failed');
       }
     }
     return alerts;
