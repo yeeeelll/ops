@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_audit_session
   ON audit_log(session_id, id);
+
+CREATE TABLE IF NOT EXISTS alerts (
+  fingerprint    TEXT PRIMARY KEY,
+  severity       TEXT NOT NULL,
+  last_sent_at   INTEGER NOT NULL,
+  first_seen_at  INTEGER NOT NULL,
+  hit_count      INTEGER NOT NULL DEFAULT 1,
+  last_message   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_last_sent
+  ON alerts(last_sent_at);
 `;
 
 db.exec(SCHEMA);

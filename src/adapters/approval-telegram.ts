@@ -71,14 +71,14 @@ export class TelegramApprovalProvider implements ApprovalProvider {
 }
 
 export function attachApprovalHandlers(bot: Telegraf, allowedUserIds: Set<number>): void {
-  bot.on(callbackQuery('data'), async (ctx: Context) => {
+  bot.on(callbackQuery('data'), async (ctx: Context, next) => {
     const data =
       ctx.callbackQuery && 'data' in ctx.callbackQuery
         ? (ctx.callbackQuery.data ?? '')
         : '';
     const uid = ctx.from?.id;
     logger.info({ data, uid, pendingSize: pending.size }, 'callback_query received');
-    if (!data.startsWith('appr:')) return;
+    if (!data.startsWith('appr:')) return next();
     const parts = data.split(':');
     const verdict = parts[1];
     const reqId = parts[2];

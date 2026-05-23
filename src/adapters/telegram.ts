@@ -8,6 +8,7 @@ import { handleCommand, isCommand } from './commands.js';
 import { asPlainBlock, escapeHtml, splitMessage, trimForEdit } from './format.js';
 import { registerApprovalProvider } from '../agent/approval.js';
 import { attachApprovalHandlers, TelegramApprovalProvider } from './approval-telegram.js';
+import { attachAlertHandlers } from './alert-callback.js';
 
 const CHANNEL = 'telegram';
 const EDIT_THROTTLE_MS = 1100;
@@ -26,6 +27,11 @@ export function buildBot(): Telegraf {
 
   registerApprovalProvider(CHANNEL, new TelegramApprovalProvider(bot, chatIdForSession));
   attachApprovalHandlers(bot, config.telegram.allowedUserIds);
+  attachAlertHandlers(bot, config.telegram.allowedUserIds, (ctx, prompt) => {
+    void runAgentTurn(ctx, prompt).catch((err) =>
+      logger.error({ err, uid: ctx.from?.id }, 'alert-triggered turn crashed'),
+    );
+  });
 
   bot.use(async (ctx, next) => {
     const uid = ctx.from?.id;

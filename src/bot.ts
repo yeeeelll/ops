@@ -4,6 +4,7 @@ import './tools/index.js';
 import { listToolNames } from './tools/registry.js';
 import { buildBot } from './adapters/telegram.js';
 import { preloadModels } from './adapters/commands.js';
+import { startWatchdog } from './watchdog/index.js';
 
 async function main(): Promise<void> {
   if (!config.telegram.token) {
@@ -18,13 +19,16 @@ async function main(): Promise<void> {
   void preloadModels();
 
   const bot = buildBot();
+  const watchdog = startWatchdog(bot);
 
   process.once('SIGINT', () => {
     logger.info('SIGINT received, stopping bot');
+    watchdog.stop();
     bot.stop('SIGINT');
   });
   process.once('SIGTERM', () => {
     logger.info('SIGTERM received, stopping bot');
+    watchdog.stop();
     bot.stop('SIGTERM');
   });
 

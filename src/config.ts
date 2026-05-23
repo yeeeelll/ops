@@ -49,6 +49,16 @@ const Schema = z.object({
   DB_QUERY_MAX_ROWS: z.coerce.number().int().positive().max(10_000).default(1_000),
   DB_QUERY_DEFAULT_LIMIT: z.coerce.number().int().positive().max(10_000).default(100),
   DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+
+  WATCHDOG_ENABLED: z.union([z.literal('true'), z.literal('false')]).default('true'),
+  WATCHDOG_INTERVAL_SEC: z.coerce.number().int().positive().default(60),
+  WATCHDOG_DISK_THRESHOLD: z.coerce.number().int().min(50).max(99).default(90),
+  WATCHDOG_MEM_THRESHOLD: z.coerce.number().int().min(50).max(99).default(90),
+  WATCHDOG_LOAD_MULTIPLIER: z.coerce.number().positive().default(4),
+  WATCHDOG_URLS: z.string().default(''),
+  WATCHDOG_DEDUP_MINUTES: z.coerce.number().int().positive().default(30),
+  WATCHDOG_AUDIT_DENY_THRESHOLD: z.coerce.number().int().nonnegative().default(10),
+  TELEGRAM_ALERT_USER_IDS: z.string().default(''),
 });
 
 interface DbProfile {
@@ -149,6 +159,20 @@ export const config = {
     maxRows: env.DB_QUERY_MAX_ROWS,
     defaultLimit: env.DB_QUERY_DEFAULT_LIMIT,
     timeoutMs: env.DB_QUERY_TIMEOUT_MS,
+  },
+  watchdog: {
+    enabled: env.WATCHDOG_ENABLED === 'true',
+    intervalSec: env.WATCHDOG_INTERVAL_SEC,
+    diskThreshold: env.WATCHDOG_DISK_THRESHOLD,
+    memThreshold: env.WATCHDOG_MEM_THRESHOLD,
+    loadMultiplier: env.WATCHDOG_LOAD_MULTIPLIER,
+    urls: csv(env.WATCHDOG_URLS),
+    dedupMinutes: env.WATCHDOG_DEDUP_MINUTES,
+    auditDenyThreshold: env.WATCHDOG_AUDIT_DENY_THRESHOLD,
+    alertUserIds:
+      csvNumbers(env.TELEGRAM_ALERT_USER_IDS).length > 0
+        ? new Set(csvNumbers(env.TELEGRAM_ALERT_USER_IDS))
+        : new Set(csvNumbers(env.TELEGRAM_ALLOWED_USER_IDS)),
   },
 } as const;
 
