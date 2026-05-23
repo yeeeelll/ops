@@ -52,8 +52,8 @@ const Schema = z.object({
 
   WATCHDOG_ENABLED: z.union([z.literal('true'), z.literal('false')]).default('true'),
   WATCHDOG_INTERVAL_SEC: z.coerce.number().int().positive().default(60),
-  WATCHDOG_DISK_THRESHOLD: z.coerce.number().int().min(50).max(99).default(90),
-  WATCHDOG_MEM_THRESHOLD: z.coerce.number().int().min(50).max(99).default(90),
+  WATCHDOG_DISK_THRESHOLD: z.coerce.number().int().min(1).max(99).default(90),
+  WATCHDOG_MEM_THRESHOLD: z.coerce.number().int().min(1).max(99).default(90),
   WATCHDOG_LOAD_MULTIPLIER: z.coerce.number().positive().default(4),
   WATCHDOG_URLS: z.string().default(''),
   WATCHDOG_DEDUP_MINUTES: z.coerce.number().int().positive().default(30),
