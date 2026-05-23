@@ -135,6 +135,8 @@ async function runAgentTurn(ctx: Context, userInput: string): Promise<void> {
   let progressText = '思考中…';
   let lastEditAt = 0;
   let pending = false;
+  let toolCount = 0;
+  let modelMismatch: string | null = null;
 
   const flushProgress = async (force = false): Promise<void> => {
     const now = Date.now();
@@ -156,8 +158,9 @@ async function runAgentTurn(ctx: Context, userInput: string): Promise<void> {
     }
   };
 
-  const appendProgress = (line: string): void => {
-    progressText = `${progressText}\n${line}`.slice(-3500);
+  /** Single-line progress, overwrites prior state (no scroll spam). */
+  const setProgress = (line: string): void => {
+    progressText = line;
     void flushProgress();
   };
 
@@ -167,27 +170,48 @@ async function runAgentTurn(ctx: Context, userInput: string): Promise<void> {
       channel: CHANNEL,
       userInput,
       onToolStart: (call) => {
+        toolCount += 1;
         const argsRaw = call.function.arguments ?? '';
-        const argsPreview = argsRaw.length > 200 ? `${argsRaw.slice(0, 200)}…` : argsRaw;
-        appendProgress(`> [工具] ${call.function.name} ${argsPreview}`);
+        const argsShort = argsRaw.replace(/\s+/g, ' ').slice(0, 80);
+        setProgress(`思考中… 调用第 ${toolCount} 个工具: ${call.function.name}\n${argsShort}`);
       },
-      onToolEnd: (call, ok, preview) => {
-        const flat = preview.replace(/\s+/g, ' ').slice(0, 240);
-        appendProgress(`> [工具] ${call.function.name} ${ok ? '成功' : '失败'} | ${flat}`);
+      onToolEnd: (call, ok) => {
+        setProgress(
+          `思考中… 第 ${toolCount} 个工具 ${call.function.name} ${ok ? '已完成' : '失败'}`,
+        );
       },
       onCompletion: ({ requestedModel, servedModel }) => {
-        const mismatch =
-          servedModel !== requestedModel && !servedModel.startsWith(`${requestedModel}-`);
-        if (mismatch) appendProgress(`> [模型不匹配] 请求=${requestedModel} 实际=${servedModel}`);
+        if (servedModel !== requestedModel && !servedModel.startsWith(`${requestedModel}-`)) {
+          modelMismatch = `模型不匹配: 请求=${requestedModel} 实际=${servedModel}`;
+        }
       },
     });
 
     const finalText = result.finalText || '(无回复)';
     const chunks = splitMessage(finalText);
-    try {
-      await ctx.telegram.editMessageText(chatId, messageId, undefined, chunks[0]!);
-    } catch (err) {
-      logger.warn({ err }, 'final edit failed, sending as new message');
+
+    if (toolCount === 0) {
+      // Pure-chat reply, no tool calls — edit the progress bubble directly,
+      // no extra message in the chat scroll.
+      try {
+        await ctx.telegram.editMessageText(chatId, messageId, undefined, chunks[0]!);
+      } catch (err) {
+        logger.warn({ err }, 'final edit failed, sending as new message');
+        await ctx.reply(chunks[0]!);
+      }
+    } else {
+      // After tool calls (some may have shown approval popups in between),
+      // collapse the progress bubble into a short summary and send the
+      // actual answer as a fresh message at the bottom so the user doesn't
+      // have to scroll up past the approval messages to find it.
+      const summary = `已完成 (用了 ${toolCount} 次工具调用)${
+        modelMismatch ? `\n[${modelMismatch}]` : ''
+      }`;
+      try {
+        await ctx.telegram.editMessageText(chatId, messageId, undefined, summary);
+      } catch (err) {
+        logger.debug({ err }, 'collapse progress edit failed');
+      }
       await ctx.reply(chunks[0]!);
     }
     for (const c of chunks.slice(1)) await ctx.reply(c);
