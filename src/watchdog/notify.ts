@@ -6,9 +6,9 @@ import { escapeHtml } from '../adapters/format.js';
 import type { AlertResult, AlertSeverity } from './types.js';
 
 const SEVERITY_ICON: Record<AlertSeverity, string> = {
-  info: 'i',
-  warning: 'WARN',
-  critical: 'CRIT',
+  info: '提示',
+  warning: '警告',
+  critical: '严重',
 };
 
 interface SendAlertArgs {
@@ -25,7 +25,7 @@ export async function sendAlert({ bot, alert, hitCount, isFirst }: SendAlertArgs
     return;
   }
   const sev = SEVERITY_ICON[alert.severity];
-  const repeat = isFirst ? '' : ` (×${hitCount})`;
+  const repeat = isFirst ? '' : ` (已重复 ${hitCount} 次)`;
   const text =
     `[${sev}] <b>${escapeHtml(alert.title)}</b>${repeat}\n` +
     `<pre>${escapeHtml(alert.message.slice(0, 1500))}</pre>`;

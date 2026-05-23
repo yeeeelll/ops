@@ -34,10 +34,11 @@ const systemdCheck: Check = {
           alerts.push({
             fingerprint: `systemd:${unit}`,
             severity: state === 'failed' ? 'critical' : 'warning',
-            title: `systemd unit ${unit} is ${state || 'inactive'}`,
+            title: `系统服务 ${unit} 状态异常: ${state || 'inactive'}`,
             message:
-              `${unit}: ${state || '(no state)'}\n` +
-              `journalctl -u ${unit} -n 30 --no-pager`,
+              `服务: ${unit}\n` +
+              `当前状态: ${state || '(无状态)'}\n` +
+              `排查命令: journalctl -u ${unit} -n 30 --no-pager`,
           });
         }
       } catch (err) {
@@ -105,10 +106,10 @@ const diskCheck: Check = {
           alerts.push({
             fingerprint: `disk:${r.mount}`,
             severity: r.capacity >= 95 ? 'critical' : 'warning',
-            title: `disk ${r.mount} ${r.capacity}% full`,
+            title: `磁盘 ${r.mount} 已使用 ${r.capacity}%`,
             message:
-              `mount: ${r.mount} (${r.source})\n` +
-              `usage: ${r.capacity}% (${r.used} / ${r.size} blocks, ${r.available} free)`,
+              `挂载点: ${r.mount} (设备 ${r.source})\n` +
+              `使用率: ${r.capacity}% (已用 ${r.used} / 总计 ${r.size} 块, 剩余 ${r.available})`,
           });
         }
       }
@@ -138,9 +139,11 @@ const memoryCheck: Check = {
           alerts.push({
             fingerprint: 'memory:usage',
             severity: usedPct >= 95 ? 'critical' : 'warning',
-            title: `memory ${usedPct}% used`,
+            title: `内存使用率 ${usedPct}%`,
             message:
-              `MemTotal: ${total} kB\nMemAvailable: ${available} kB\nUsage: ${usedPct}%`,
+              `总内存 (MemTotal): ${total} kB\n` +
+              `可用 (MemAvailable): ${available} kB\n` +
+              `使用率: ${usedPct}%`,
           });
         }
       }
@@ -163,8 +166,10 @@ const loadCheck: Check = {
       alerts.push({
         fingerprint: 'load:1min',
         severity: load1 > threshold * 1.5 ? 'critical' : 'warning',
-        title: `load average ${load1.toFixed(2)} (${cpus} CPUs, threshold ${threshold.toFixed(1)})`,
-        message: `loadavg: ${loadavg.map((n) => n.toFixed(2)).join(' / ')}\nCPUs: ${cpus}`,
+        title: `系统负载过高 1 分钟 ${load1.toFixed(2)} (${cpus} 核, 阈值 ${threshold.toFixed(1)})`,
+        message:
+          `loadavg (1/5/15 分钟): ${loadavg.map((n) => n.toFixed(2)).join(' / ')}\n` +
+          `CPU 核心数: ${cpus}`,
       });
     }
     return alerts;
@@ -197,8 +202,8 @@ const httpCheck: Check = {
             alerts.push({
               fingerprint: fp,
               severity: resp.status >= 500 ? 'critical' : 'warning',
-              title: `HTTP ${resp.status} on ${url}`,
-              message: `URL: ${url}\nstatus: ${resp.status} ${resp.statusText}`,
+              title: `HTTP ${resp.status} 错误: ${url}`,
+              message: `URL: ${url}\n响应状态: ${resp.status} ${resp.statusText}`,
             });
           }
         } catch (err) {
@@ -206,8 +211,8 @@ const httpCheck: Check = {
           alerts.push({
             fingerprint: fp,
             severity: 'critical',
-            title: `HTTP unreachable: ${url}`,
-            message: `URL: ${url}\nerror: ${msg}`,
+            title: `HTTP 无法访问: ${url}`,
+            message: `URL: ${url}\n错误: ${msg}`,
           });
         }
       }),
@@ -231,8 +236,10 @@ const dbPingCheck: Check = {
         alerts.push({
           fingerprint: `db_ping:${profile.name}`,
           severity: 'critical',
-          title: `DB profile ${profile.name} unreachable`,
-          message: `profile: ${profile.name} (${profile.driver})\nerror: ${msg}`,
+          title: `数据库 ${profile.name} 无法连接`,
+          message:
+            `profile: ${profile.name} (驱动 ${profile.driver})\n` +
+            `错误: ${msg}`,
         });
       }
     }
@@ -259,11 +266,11 @@ const auditCheck: Check = {
       alerts.push({
         fingerprint: 'audit:denied_burst',
         severity: 'warning',
-        title: `${n} denied/timeout tool calls in last hour`,
+        title: `过去 1 小时内 ${n} 次工具调用被拒绝/超时`,
         message:
-          `denied + timeout calls (1h): ${n}\n` +
-          `threshold: ${threshold}\n` +
-          `Possible prompt injection / abuse. Check audit_log and recent sessions.`,
+          `被拒绝 + 超时次数 (近 1 小时): ${n}\n` +
+          `告警阈值: ${threshold}\n` +
+          `可能存在 prompt injection 或滥用, 请检查 audit_log 和最近会话。`,
       });
     }
     return alerts;
