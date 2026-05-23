@@ -16,6 +16,11 @@ const HARD_BLOCKED: RegExp[] = [
   />\s*\/dev\/sd[a-z]/i,
 ];
 
+// DB clients are blocked even under approval — must use db_query / db_write
+// so credentials never leave .env and SQL goes through the validator pipeline.
+const DB_CLIENT_PATTERN =
+  /^\s*(mysql|mysqldump|mysqladmin|mariadb|mariadb-dump|psql|pg_dump|pg_restore|redis-cli|mongosh|mongo|sqlite3)\b/i;
+
 function checkHardBlocked(cmd: string): string | null {
   for (const re of HARD_BLOCKED) {
     if (re.test(cmd)) return `命中硬黑名单: ${re}`;
@@ -67,6 +72,15 @@ registerTool({
 
     const denied = checkDeniedPath(command);
     if (denied) return { ok: false, content: `拒绝执行: ${denied}` };
+
+    if (DB_CLIENT_PATTERN.test(command)) {
+      return {
+        ok: false,
+        content:
+          '拒绝执行: 不允许通过 shell 调用 DB 客户端 (mysql/psql/redis-cli 等)。' +
+          '请使用 db_query (只读) 或 db_write (写入, 自动审批) 工具, 凭据由 .env DB_PROFILES 管理。',
+      };
+    }
 
     const timeoutMs = Math.min(
       Math.max(Number(args.timeout_ms) || config.tools.shellTimeoutMs, 1_000),

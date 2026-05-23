@@ -44,7 +44,40 @@ const Schema = z.object({
   SHELL_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   SHELL_KILL_GRACE_MS: z.coerce.number().int().positive().default(5_000),
   APPROVAL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+
+  DB_PROFILES: z.string().default(''),
+  DB_QUERY_MAX_ROWS: z.coerce.number().int().positive().max(10_000).default(1_000),
+  DB_QUERY_DEFAULT_LIMIT: z.coerce.number().int().positive().max(10_000).default(100),
+  DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 });
+
+interface DbProfile {
+  name: string;
+  driver: 'mysql' | 'postgres';
+  dsn: string;
+}
+
+function parseDbProfiles(raw: string): DbProfile[] {
+  if (!raw.trim()) return [];
+  const out: DbProfile[] = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const sep = entry.indexOf(':');
+    if (sep <= 0) continue;
+    const name = entry.slice(0, sep).trim();
+    const dsn = entry.slice(sep + 1).trim();
+    let driver: DbProfile['driver'];
+    if (dsn.startsWith('mysql://') || dsn.startsWith('mariadb://')) {
+      driver = 'mysql';
+    } else if (dsn.startsWith('postgres://') || dsn.startsWith('postgresql://')) {
+      driver = 'postgres';
+    } else {
+      continue;
+    }
+    if (!name || /[^a-zA-Z0-9_-]/.test(name)) continue;
+    out.push({ name, driver, dsn });
+  }
+  return out;
+}
 
 const parsed = Schema.safeParse(process.env);
 if (!parsed.success) {
@@ -111,6 +144,14 @@ export const config = {
     shellKillGraceMs: env.SHELL_KILL_GRACE_MS,
     approvalTimeoutMs: env.APPROVAL_TIMEOUT_MS,
   },
+  db: {
+    profiles: parseDbProfiles(env.DB_PROFILES),
+    maxRows: env.DB_QUERY_MAX_ROWS,
+    defaultLimit: env.DB_QUERY_DEFAULT_LIMIT,
+    timeoutMs: env.DB_QUERY_TIMEOUT_MS,
+  },
 } as const;
+
+export type { DbProfile };
 
 export type Config = typeof config;

@@ -16,6 +16,12 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   />\s*\/dev\/sd[a-z]/i,
 ];
 
+// DB clients are blocked at shell layer — use db_query / db_write tools instead.
+// Prevents the agent from picking up credentials from config files and piping
+// them to a raw shell SQL client.
+const DB_CLIENT_PATTERN =
+  /^\s*(mysql|mysqldump|mysqladmin|mariadb|mariadb-dump|psql|pg_dump|pg_restore|redis-cli|mongosh|mongo|sqlite3)\b/i;
+
 const READ_ONLY_BINARIES = new Set([
   // text + filesystem inspection
   'ls', 'cat', 'tail', 'head', 'grep', 'egrep', 'fgrep', 'zgrep', 'zcat',
@@ -143,6 +149,15 @@ registerTool({
 
     const denied = checkDeniedPath(command);
     if (denied) return { ok: false, content: `rejected: ${denied}` };
+
+    if (DB_CLIENT_PATTERN.test(command)) {
+      return {
+        ok: false,
+        content:
+          'rejected: DB clients are not allowed via shell. Use the db_query tool ' +
+          '(read-only) for SELECT/SHOW/DESCRIBE. Credentials are managed via .env DB_PROFILES.',
+      };
+    }
 
     if (!isLikelyReadOnly(command)) {
       return {
