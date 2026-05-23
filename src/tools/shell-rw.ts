@@ -23,6 +23,15 @@ function checkHardBlocked(cmd: string): string | null {
   return null;
 }
 
+function checkDeniedPath(cmd: string): string | null {
+  for (const deny of config.tools.denyPaths) {
+    if (cmd.includes(deny)) {
+      return `命令引用了禁用路径 (agent 自身密钥 / 系统凭据): ${deny}`;
+    }
+  }
+  return null;
+}
+
 registerTool({
   name: 'shell_rw',
   description:
@@ -55,6 +64,9 @@ registerTool({
 
     const blocked = checkHardBlocked(command);
     if (blocked) return { ok: false, content: `拒绝执行: ${blocked}` };
+
+    const denied = checkDeniedPath(command);
+    if (denied) return { ok: false, content: `拒绝执行: ${denied}` };
 
     const timeoutMs = Math.min(
       Math.max(Number(args.timeout_ms) || config.tools.shellTimeoutMs, 1_000),

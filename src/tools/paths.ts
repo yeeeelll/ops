@@ -10,6 +10,17 @@ export interface PathCheck {
 
 export function checkPath(input: string, requireWrite = false): PathCheck {
   const resolved = path.resolve(input);
+  const denied = config.tools.denyPaths.some(
+    (deny) => resolved === deny || isInside(resolved, deny),
+  );
+  if (denied) {
+    return {
+      ok: false,
+      resolved,
+      readonly: true,
+      reason: `path matches DENY_PATHS (agent secrets / system creds): ${resolved}`,
+    };
+  }
   const allowedRoots = config.tools.allowedPaths;
   if (allowedRoots.length === 0) {
     return { ok: false, resolved, readonly: true, reason: 'ALLOWED_PATHS is empty' };

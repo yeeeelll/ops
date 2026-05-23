@@ -83,10 +83,32 @@ sudo APP_USER=aiops bash deploy/install.sh
 脚本会:
 1. 不存在则自动建系统用户 `aiops`
 2. 把 `/opt/ai-agent` 全部 chown 给 `aiops`, `.env` 设 600
-3. 渲染 `/etc/sudoers.d/ai-agent` (基于 `.env` 的 APPROVED_SERVICES 自动生成 systemctl 白名单 + chattr/lsattr)
+3. 渲染 `/etc/sudoers.d/ai-agent`:
+   - systemctl 白名单从 `.env` 的 `APPROVED_SERVICES` 自动生成
+   - **chattr / lsattr 限定到 `WRITABLE_PATHS`** — agent 不能 unlock 任意系统文件
 4. 用 `visudo -c` 校验后才安装
-5. 渲染 + 安装 systemd unit (`User=aiops`)
-6. `daemon-reload && enable && restart`
+5. 为 `WRITABLE_PATHS` 里**不属于 aiops** 的目录授予写权限:
+   - 装了 `acl`: `setfacl -R -m u:aiops:rwx` (per-site 精确, **多站推荐**)
+   - 没装 acl: fallback 把 aiops 加到目录组 + `chmod g+w` (粗粒度, 同 group 跨站可见)
+6. 渲染 + 安装 systemd unit (`User=aiops`)
+7. `daemon-reload && enable && restart`
+
+### 多站点 (推荐 ACL 模式)
+
+如果服务器跑了多个站点 `/www/wwwroot/site-a`, `/www/wwwroot/site-b`, 别让 aiops 加入 `www` 组 — 那样它能读所有站。
+
+正确做法:
+
+```bash
+sudo apt install acl    # 一次性, 后续都吃 ACL 路径
+# .env 里精确列出要写的站
+WRITABLE_PATHS=/opt/ai-agent,/www/wwwroot/site-a
+ALLOWED_PATHS=/opt,/var/log,/www/wwwroot/site-a,/etc/nginx
+# 重跑 install.sh, 仅对 site-a 授予 ACL, site-b 仍不可访问
+sudo APP_USER=aiops bash deploy/install.sh
+```
+
+要新增站 c, 在 `.env` 追加路径, 重跑 install.sh 即可。
 
 **保持 root 运行** (兼容老部署):
 

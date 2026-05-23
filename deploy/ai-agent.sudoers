@@ -1,23 +1,21 @@
 # Sudoers fragment for the AI Ops Agent dedicated user.
 # Installed by deploy/install.sh to /etc/sudoers.d/ai-agent (mode 0440).
 #
-# Placeholders:
-#   __USER__       - replaced with APP_USER (e.g. aiops)
-#   __SERVICES__   - replaced with the rendered Cmnd_Alias body
-#                    (one systemctl invocation per APPROVED_SERVICES entry)
+# Placeholders rendered by install.sh:
+#   __USER__       - APP_USER (e.g. aiops)
+#   __SERVICES__   - systemctl Cmnd_Alias body, from .env APPROVED_SERVICES
+#   __FS_LOCK__    - chattr Cmnd_Alias body, scoped to .env WRITABLE_PATHS
+#   __FS_INSPECT__ - lsattr Cmnd_Alias body, scoped to .env WRITABLE_PATHS
 #
 # The user can ONLY run the commands listed below. Everything else still
-# needs root.
+# needs root. chattr is restricted to WRITABLE_PATHS so the agent cannot
+# unlock arbitrary system files (e.g. /etc/passwd, /www/wwwroot/<other-site>).
 
 Cmnd_Alias AIOPS_SERVICES = __SERVICES__
 
-Cmnd_Alias AIOPS_FS_LOCK = /usr/bin/chattr -i /*, \
-                           /usr/bin/chattr +i /*, \
-                           /bin/chattr -i /*, \
-                           /bin/chattr +i /*
+Cmnd_Alias AIOPS_FS_LOCK = __FS_LOCK__
 
-# Allow listing immutable status without password
-Cmnd_Alias AIOPS_FS_INSPECT = /usr/bin/lsattr /*, /bin/lsattr /*
+Cmnd_Alias AIOPS_FS_INSPECT = __FS_INSPECT__
 
 __USER__ ALL=(root) NOPASSWD: AIOPS_SERVICES, AIOPS_FS_LOCK, AIOPS_FS_INSPECT
 

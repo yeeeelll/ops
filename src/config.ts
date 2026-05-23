@@ -35,6 +35,7 @@ const Schema = z.object({
   ALLOWED_PATHS: z.string().default(''),
   READONLY_PATHS: z.string().default(''),
   WRITABLE_PATHS: z.string().default(''),
+  DENY_PATHS: z.string().default(''),
   APPROVED_SERVICES: z.string().default(''),
   APPROVED_GIT_REPOS: z.string().default(''),
   USE_SUDO: z
@@ -59,6 +60,21 @@ const dataDir = path.resolve(env.DATA_DIR);
 const logDir = path.resolve(env.LOG_DIR);
 fs.mkdirSync(dataDir, { recursive: true });
 fs.mkdirSync(logDir, { recursive: true });
+
+// Files / dirs the agent must never read or write, regardless of ALLOWED_PATHS.
+// Protects: agent's own secrets, session db, system credential stores.
+const defaultDenyPaths = [
+  path.resolve('.env'),
+  path.resolve('.env.local'),
+  path.resolve('.env.production'),
+  dataDir,
+  '/etc/shadow',
+  '/etc/sudoers',
+  '/etc/sudoers.d',
+  '/root/.ssh',
+];
+const userDenyPaths = csv(env.DENY_PATHS).map((p) => path.resolve(p));
+const denyPaths = Array.from(new Set([...defaultDenyPaths, ...userDenyPaths]));
 
 export const config = {
   llm: {
@@ -86,6 +102,7 @@ export const config = {
     allowedPaths: csv(env.ALLOWED_PATHS).map((p) => path.resolve(p)),
     readonlyPaths: csv(env.READONLY_PATHS).map((p) => path.resolve(p)),
     writablePaths: csv(env.WRITABLE_PATHS).map((p) => path.resolve(p)),
+    denyPaths,
     approvedServices: csv(env.APPROVED_SERVICES),
     approvedGitRepos: csv(env.APPROVED_GIT_REPOS).map((p) => path.resolve(p)),
     useSudo:

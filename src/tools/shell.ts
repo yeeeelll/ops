@@ -48,6 +48,15 @@ function checkDangerous(cmd: string): string | null {
   return null;
 }
 
+function checkDeniedPath(cmd: string): string | null {
+  for (const deny of config.tools.denyPaths) {
+    if (cmd.includes(deny)) {
+      return `command references denied path: ${deny}`;
+    }
+  }
+  return null;
+}
+
 function isLikelyReadOnly(cmd: string): boolean {
   const head = firstWord(cmd);
   if (!head) return false;
@@ -131,6 +140,9 @@ registerTool({
 
     const danger = checkDangerous(command);
     if (danger) return { ok: false, content: `rejected: ${danger}` };
+
+    const denied = checkDeniedPath(command);
+    if (denied) return { ok: false, content: `rejected: ${denied}` };
 
     if (!isLikelyReadOnly(command)) {
       return {

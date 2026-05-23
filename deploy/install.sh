@@ -82,20 +82,129 @@ build_services_cmnd() {
   echo "$out"
 }
 
+# Helper: read CSV list from .env for a given key.
+read_env_list() {
+  local env_file="$1" key="$2"
+  grep -E "^${key}=" "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'"
+}
+
+# Build chattr Cmnd_Alias body scoped to WRITABLE_PATHS. sudoers fnmatch globs
+# do NOT cross `/`, so we list both `<dir>/*` (one level) and `chattr -R <dir>`
+# (whole subtree) per writable path. Prevents agent from unlocking arbitrary
+# system files (e.g. /etc/passwd, /www/wwwroot/<other-site>).
+build_fs_lock_cmnd() {
+  local env_file="$1"
+  local list
+  list="$(read_env_list "$env_file" WRITABLE_PATHS)"
+  if [[ -z "$list" ]]; then echo "/bin/false"; return; fi
+  local first=1 out=""
+  IFS=',' read -ra parts <<< "$list"
+  for raw in "${parts[@]}"; do
+    local p="${raw// /}"
+    [[ -z "$p" ]] && continue
+    for cmd in "chattr -i ${p}/*" "chattr +i ${p}/*" "chattr -R -i ${p}" "chattr -R +i ${p}"; do
+      if [[ $first -eq 1 ]]; then
+        first=0
+        out="/usr/bin/$cmd"
+      else
+        out="$out, \\
+                            /usr/bin/$cmd"
+      fi
+    done
+  done
+  [[ -z "$out" ]] && { echo "/bin/false"; return; }
+  echo "$out"
+}
+
+# Build lsattr Cmnd_Alias body scoped to WRITABLE_PATHS.
+build_fs_inspect_cmnd() {
+  local env_file="$1"
+  local list
+  list="$(read_env_list "$env_file" WRITABLE_PATHS)"
+  if [[ -z "$list" ]]; then echo "/bin/false"; return; fi
+  local first=1 out=""
+  IFS=',' read -ra parts <<< "$list"
+  for raw in "${parts[@]}"; do
+    local p="${raw// /}"
+    [[ -z "$p" ]] && continue
+    for cmd in "lsattr ${p}" "lsattr -R ${p}" "lsattr ${p}/*"; do
+      if [[ $first -eq 1 ]]; then
+        first=0
+        out="/usr/bin/$cmd"
+      else
+        out="$out, \\
+                            /usr/bin/$cmd"
+      fi
+    done
+  done
+  [[ -z "$out" ]] && { echo "/bin/false"; return; }
+  echo "$out"
+}
+
+# Grant APP_USER write access on each WRITABLE_PATHS entry.
+# Prefers POSIX ACL (per-directory, doesn't disturb existing owner/group).
+# Falls back to adding APP_USER to the directory's group + chmod g+w + g+s
+# (less precise: APP_USER then sees ALL files in that group, including
+# unrelated sites if multiple share the same group e.g. `www`).
+grant_write_access() {
+  local user="$1" env_file="$2"
+  local list
+  list="$(read_env_list "$env_file" WRITABLE_PATHS)"
+  [[ -z "$list" ]] && { echo "WRITABLE_PATHS empty, skipping write-access grant"; return; }
+
+  local have_acl=0
+  if command -v setfacl >/dev/null 2>&1; then have_acl=1; fi
+
+  IFS=',' read -ra parts <<< "$list"
+  for raw in "${parts[@]}"; do
+    local d="${raw// /}"
+    [[ -z "$d" || ! -d "$d" ]] && continue
+    local owner
+    owner="$(stat -c '%U' "$d")"
+    if [[ "$owner" == "$user" ]]; then
+      echo "  $d already owned by $user, skip"
+      continue
+    fi
+
+    if [[ $have_acl -eq 1 ]]; then
+      echo "  ACL: u:$user:rwx on $d (recursive + default)"
+      setfacl -R -m "u:$user:rwx" "$d" || echo "    WARN: setfacl failed on $d"
+      setfacl -dR -m "u:$user:rwx" "$d" || echo "    WARN: setfacl default ACL failed on $d"
+    else
+      local grp
+      grp="$(stat -c '%G' "$d")"
+      if [[ -z "$grp" || "$grp" == "$user" ]]; then
+        echo "  $d: no group fallback available, skip"
+        continue
+      fi
+      echo "  GROUP fallback: add $user to '$grp' + g+w/g+s on $d"
+      echo "    (install 'acl' package and re-run install.sh for per-site scoping)"
+      usermod -aG "$grp" "$user"
+      chmod -R g+w "$d" 2>/dev/null || true
+      chmod g+s "$d" 2>/dev/null || true
+      find "$d" -type d -exec chmod g+s {} \; 2>/dev/null || true
+    fi
+  done
+}
+
 install_sudoers() {
   local user="$1"
   if [[ "$user" == "root" ]]; then
     rm -f "$SUDOERS_TARGET"
     return
   fi
-  local services_cmnd
+  local services_cmnd fs_lock fs_inspect
   services_cmnd="$(build_services_cmnd "$APP_DIR/.env")"
+  fs_lock="$(build_fs_lock_cmnd "$APP_DIR/.env")"
+  fs_inspect="$(build_fs_inspect_cmnd "$APP_DIR/.env")"
   local tmp
   tmp="$(mktemp)"
-  awk -v user="$user" -v services="$services_cmnd" '
+  awk -v user="$user" -v services="$services_cmnd" -v fslock="$fs_lock" -v fsinspect="$fs_inspect" '
     {
       gsub("__USER__", user);
       gsub("__SERVICES__", services);
+      gsub("__FS_LOCK__", fslock);
+      gsub("__FS_INSPECT__", fsinspect);
       print;
     }
   ' "$SUDOERS_TEMPLATE" > "$tmp"
@@ -186,6 +295,12 @@ mkdir -p "$APP_DIR/data" "$APP_DIR/logs"
 fix_ownership "$APP_USER" "$APP_DIR"
 
 install_sudoers "$APP_USER"
+
+# Grant write access on each WRITABLE_PATHS entry (ACL preferred, group fallback)
+if [[ "$APP_USER" != "root" ]]; then
+  echo "Granting write access for $APP_USER on WRITABLE_PATHS..."
+  grant_write_access "$APP_USER" "$APP_DIR/.env"
+fi
 
 # Render systemd unit
 sed -e "s|__USER__|$APP_USER|g" \
