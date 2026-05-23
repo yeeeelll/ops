@@ -20,18 +20,36 @@ function expandUnitName(raw: string): string | null {
 interface UnitHealth {
   ok: boolean;
   state: string;
-  via: 'systemd' | 'sysv' | 'none';
+  via: 'systemd' | 'sysv' | 'pgrep-x' | 'pgrep-f' | 'none';
 }
 
 /**
- * Check unit liveness with a two-layer probe.
+ * Some unit names don't match their process binary. Map known divergences
+ * so a basic pgrep -x can still succeed. Falls back to pgrep -f (cmdline
+ * regex) otherwise.
+ */
+const PROCESS_ALIASES: Record<string, string[]> = {
+  mysql: ['mysqld', 'mariadbd'],
+  mariadb: ['mariadbd', 'mysqld'],
+  'redis-server': ['redis-server'],
+  redis: ['redis-server'],
+  'php-fpm': ['php-fpm'],
+  nginx: ['nginx'],
+  apache2: ['apache2'],
+  httpd: ['httpd'],
+  postgresql: ['postgres'],
+};
+
+/**
+ * Multi-layer unit liveness probe:
  *
- * 1. `systemctl is-active`. Returns active for native systemd units.
- * 2. SysV init.d fallback (`service <unit> status`). 宝塔面板 installs
- *    nginx / redis / mysql via SysV scripts that daemonize themselves;
- *    the auto-generated systemd unit reports inactive even when the
- *    process is healthy. Treat exit 0 from `service <name> status` as
- *    confirmation the service is up.
+ * 1. `systemctl is-active` — native systemd.
+ * 2. `service <unit> status` — SysV init.d (宝塔 nginx/redis install path).
+ * 3. `pgrep -x <name>` — exact process name (covers unit→proc renames via
+ *    PROCESS_ALIASES, e.g. mysql → mysqld).
+ * 4. `pgrep -f <name>` — loose cmdline regex. Last resort, may catch a
+ *    grep / editor matching the name, but better than a false alarm when
+ *    a daemon detaches into PID 1 outside any cgroup (BT-Panel pattern).
  */
 async function checkUnitHealth(unit: string): Promise<UnitHealth> {
   const sd = await execa('systemctl', ['is-active', unit], {
@@ -44,6 +62,7 @@ async function checkUnitHealth(unit: string): Promise<UnitHealth> {
   }
 
   const sysvName = unit.replace(/\.service$/, '');
+
   try {
     const sv = await execa('service', [sysvName, 'status'], {
       timeout: SYSTEMCTL_TIMEOUT_MS,
@@ -56,7 +75,36 @@ async function checkUnitHealth(unit: string): Promise<UnitHealth> {
     logger.debug({ err, unit }, 'sysv service status probe failed');
   }
 
-  return { ok: false, state: sdState || 'inactive', via: 'systemd' };
+  const exactCandidates = PROCESS_ALIASES[sysvName] ?? [sysvName];
+  for (const name of exactCandidates) {
+    try {
+      const r = await execa('pgrep', ['-x', name], {
+        timeout: SYSTEMCTL_TIMEOUT_MS,
+        reject: false,
+      });
+      const pid = (r.stdout ?? '').trim().split('\n')[0];
+      if (r.exitCode === 0 && pid) {
+        return { ok: true, state: `active (pgrep -x ${name} pid=${pid})`, via: 'pgrep-x' };
+      }
+    } catch (err) {
+      logger.debug({ err, unit, name }, 'pgrep -x probe failed');
+    }
+  }
+
+  try {
+    const r = await execa('pgrep', ['-f', sysvName], {
+      timeout: SYSTEMCTL_TIMEOUT_MS,
+      reject: false,
+    });
+    const pid = (r.stdout ?? '').trim().split('\n')[0];
+    if (r.exitCode === 0 && pid) {
+      return { ok: true, state: `active (pgrep -f ${sysvName} pid=${pid})`, via: 'pgrep-f' };
+    }
+  } catch (err) {
+    logger.debug({ err, unit }, 'pgrep -f probe failed');
+  }
+
+  return { ok: false, state: sdState || 'inactive', via: 'none' };
 }
 
 const systemdCheck: Check = {
@@ -76,7 +124,7 @@ const systemdCheck: Check = {
             message:
               `服务: ${unit}\n` +
               `当前状态: ${health.state}\n` +
-              `已尝试: systemctl + service (SysV) 均未检测到运行\n` +
+              `已尝试: systemctl is-active → service ${unit.replace(/\.service$/, '')} status → pgrep -x → pgrep -f, 均未发现进程\n` +
               `排查命令: journalctl -u ${unit} -n 30 --no-pager`,
           });
         }
