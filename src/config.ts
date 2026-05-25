@@ -50,6 +50,11 @@ const Schema = z.object({
   DB_QUERY_DEFAULT_LIMIT: z.coerce.number().int().positive().max(10_000).default(100),
   DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
+  BT_PANEL_URL: z.string().default(''),
+  BT_API_KEY: z.string().default(''),
+  BT_API_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  BT_TLS_INSECURE: z.union([z.literal('true'), z.literal('false')]).default('false'),
+
   WATCHDOG_ENABLED: z.union([z.literal('true'), z.literal('false')]).default('true'),
   WATCHDOG_INTERVAL_SEC: z.coerce.number().int().positive().default(60),
   WATCHDOG_DISK_THRESHOLD: z.coerce.number().int().min(1).max(99).default(90),
@@ -159,6 +164,13 @@ export const config = {
     maxRows: env.DB_QUERY_MAX_ROWS,
     defaultLimit: env.DB_QUERY_DEFAULT_LIMIT,
     timeoutMs: env.DB_QUERY_TIMEOUT_MS,
+  },
+  bt: {
+    panelUrl: env.BT_PANEL_URL.replace(/\/+$/, ''),
+    apiKey: env.BT_API_KEY,
+    timeoutMs: env.BT_API_TIMEOUT_MS,
+    tlsInsecure: env.BT_TLS_INSECURE === 'true',
+    enabled: env.BT_PANEL_URL.length > 0 && env.BT_API_KEY.length > 0,
   },
   watchdog: {
     enabled: env.WATCHDOG_ENABLED === 'true',

@@ -5,3 +5,4 @@ import './service.js';
 import './git.js';
 import './shell-rw.js';
 import './db.js';
+import './bt.js';

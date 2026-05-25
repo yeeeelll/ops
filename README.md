@@ -11,7 +11,7 @@ OpenRouter-backed ops agent with Telegram bot adapter (planned) and CLI for ad-h
 | P2 | Telegram bot with allow-list + pseudo streaming | done |
 | P3 | write_file / edit_file / service_op / git_op / shell_rw | done |
 | P4 | Approval layer (CLI stdin + Telegram inline button + audit) | done |
-| P5 | 宝塔 panel API client | todo |
+| P5 | 宝塔 panel API client (bt_sites_list / bt_site_op / bt_db_list / bt_db_backup / bt_file_op / bt_ssl_check / bt_cron / bt_logs_recent) | done |
 | P6 | Cron watchdog + proactive alerts | todo |
 | P7 | systemd unit + install/update scripts | done |
 
@@ -43,6 +43,7 @@ All knobs live in `.env`. See `.env.example` for the full list. Critical entries
 - `APPROVED_GIT_REPOS` — repo roots `git_op` may operate within.
 - `APPROVAL_TIMEOUT_MS` — how long to wait for user approval before auto-denying (default 60000).
 - `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` — required for bot mode.
+- `BT_PANEL_URL` + `BT_API_KEY` — required for `bt_*` tools (宝塔面板 API). 留空则全部 `bt_*` 工具返回 "未配置" 错误。`BT_TLS_INSECURE=true` 跳过自签证书校验。
 
 ## Architecture
 
@@ -68,3 +69,19 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 - Every tool call (including denials and approval timeouts) is recorded in `audit_log` with the approval decision.
 - Write tools (`write_file`, `edit_file`, `service_op`, `git_op`, `shell_rw`) are flagged `dangerous: true` and ALWAYS request user approval through the originating channel (CLI stdin or Telegram inline button) before executing. The approval times out after `APPROVAL_TIMEOUT_MS`.
 - `shell_rw` keeps a hard blocklist (`rm -rf /`, `mkfs`, `dd of=/dev/...`, `shutdown`, fork bomb, etc.) that cannot be approved.
+- `bt_file_op` paths are checked against `DENY_PATHS` (same blocklist as `read_file` / `write_file`), so the agent cannot use the panel API to read `.env`, `/etc/shadow`, etc.
+
+## 宝塔工具 (P5)
+
+| Tool | Action | Approval |
+| --- | --- | --- |
+| `bt_sites_list` | 列站点 (domain/PHP/状态/到期) | no |
+| `bt_site_op` | start / stop / set_php | yes |
+| `bt_db_list` | 列数据库 | no |
+| `bt_db_backup` | 触发面板备份 | yes |
+| `bt_file_op` | read / write / mkdir (受 DENY_PATHS 限制) | yes |
+| `bt_ssl_check` | 查 SSL 有效期 (单站点或全部) | no |
+| `bt_cron` | list (add/delete 留下轮) | yes |
+| `bt_logs_recent` | tail access/error 日志 (`/www/wwwlogs/<domain>.log`) | no |
+
+需在 `.env` 配置 `BT_PANEL_URL` + `BT_API_KEY` (面板 → 设置 → API 接口, 并把本机 IP 加入白名单)。鉴权用 `md5(time + md5(api_key))`, 无第三方依赖。
