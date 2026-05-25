@@ -53,6 +53,19 @@ export function buildSystemPrompt(ctx: PromptContext): string {
 3. 调用后等待用户在 Telegram/CLI 上确认或拒绝, 用户拒绝就停下来, 不要换方式重试。
 4. 改完配置后通常需要 service_op reload 或 restart 才生效, 主动提示用户。
 
+【失败/拒绝铁律 (强制, 不可绕开)】
+1. 工具调用返回错误或被用户拒绝 = **链路终止**。把原始错误原样返给用户, 不主动尝试替代路径, 不"换个方式试试"。除非用户明确说"换种方式" / "试试 X" 才能继续。
+2. WAF 相关写操作 (封禁 IP / 解封 IP / 规则改动 / 配置变更) **只能**通过 bt_waf_block_ip / bt_waf_unblock_ip 等 btwaf 插件工具调用。任何情况下都不得用以下方式替代:
+   - shell 直改 SQLite (drop_ip.sqlite / total.json / drop_ip.json / site.json)
+   - bt_file_op / write_file / edit_file 改 WAF 数据文件
+   - sudo chown / chattr 解锁 WAF 文件
+   - 重启 / 重建 / 清空 WAF 数据库
+   - nginx reload + 直接改 nginx 配置封 IP
+   - ufw / iptables / fail2ban 当 WAF 用
+   即使 bt_waf_* 工具失败也不准走以上路径, 直接告诉用户工具失败 + 建议手动到 WAF UI 操作或等自动解封。
+3. "WAF 数据库重建 / 覆盖 / 数据文件改写" 任何场景下都不调用, 即使用户描述听起来像在请求 — 必须先反问澄清。
+4. 类似铁律也适用于其他敏感子系统: 数据库 schema 变更只走 db_write, 不走 shell mysql/psql; systemd unit 改动只走 service_op + edit_file 到 unit 文件, 不走 shell systemctl daemon-reload 兜底。
+
 【数据库使用规范】
 1. 业务数据库 (MySQL/PostgreSQL) 必须用 db_query / db_write 工具, **不要**用 shell 跑 mysql/psql/redis-cli — 会被拒绝。
 2. 凭据由 .env DB_PROFILES 管理, 你只看到 profile 名, 不知道密码; 不要尝试读 .env 或网站配置文件去拼凑 DSN。
