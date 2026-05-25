@@ -77,7 +77,7 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 | Tool | Action | Approval |
 | --- | --- | --- |
 | `bt_sites_list` | 列站点 (domain/PHP/状态/到期) | no |
-| `bt_site_op` | start / stop / set_php / delete (+可选同删 path/database/ftp) | yes |
+| `bt_site_op` | create / start / stop / set_php / delete (+可选同删 path/database/ftp) | yes |
 | `bt_db_list` | 列数据库 | no |
 | `bt_db_backup` | 触发面板备份 | yes |
 | `bt_file_op` | read / write / mkdir (受 DENY_PATHS 限制) | yes |

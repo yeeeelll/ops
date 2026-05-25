@@ -184,18 +184,29 @@ registerTool({
 registerTool({
   name: 'bt_site_op',
   description:
-    '宝塔站点操作. 需审批. action: start | stop | set_php | delete. ' +
+    '宝塔站点操作. 需审批. action: create | start | stop | set_php | delete. ' +
     'set_php 需 php_version (如 "74" / "80" / "81"). ' +
-    'delete 删站点; 默认仅删面板记录 + vhost 配置, 站点目录 / 数据库 / FTP 保留. ' +
-    '同时删需显式 delete_path=true / delete_database=true / delete_ftp=true. ' +
-    '宝塔会自动 chattr -i .user.ini 后清理 (走 panel API, 不需要本机 sudo).',
+    'create 新建站点: 必填 domain + php_version ("0"/""=纯静态). 可选 domains_extra (csv 额外域名), port (默认 80), ps (备注), path (默认 /www/wwwroot/<domain>), create_database (true 时需 db_user + db_password). ' +
+    'delete 删站点; 默认仅删面板记录 + vhost 配置, 同时删需显式 delete_path/delete_database/delete_ftp = true. ' +
+    '走 panel API, 自动处理 chattr -i .user.ini.',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['start', 'stop', 'set_php', 'delete'] },
-      site_id: { type: 'integer', description: '站点 id (来自 bt_sites_list)' },
-      site_name: { type: 'string', description: '站点 domain, 如 example.com' },
-      php_version: { type: 'string', description: 'set_php 时必填' },
+      action: { type: 'string', enum: ['create', 'start', 'stop', 'set_php', 'delete'] },
+      site_id: { type: 'integer', description: '站点 id (来自 bt_sites_list); create 时不需要' },
+      site_name: { type: 'string', description: '站点 domain, 如 example.com; create 时同 domain' },
+      domain: { type: 'string', description: 'create 时主域名 (与 site_name 二选一)' },
+      domains_extra: { type: 'string', description: 'create 时额外域名 csv, 例 "www.a.com,m.a.com"' },
+      php_version: {
+        type: 'string',
+        description: 'set_php 必填; create 时必填 ("0"/""=静态站, "74"/"80"/"81" 等=PHP)',
+      },
+      port: { type: 'integer', description: 'create 时端口, 默认 80' },
+      ps: { type: 'string', description: 'create 时备注, 默认 = domain' },
+      path: { type: 'string', description: 'create 时站点根目录, 默认 /www/wwwroot/<domain>' },
+      create_database: { type: 'boolean', description: 'create 时同建数据库, 默认 false' },
+      db_user: { type: 'string', description: 'create_database=true 时 DB 用户名' },
+      db_password: { type: 'string', description: 'create_database=true 时 DB 密码 (≥8 位)' },
       delete_path: { type: 'boolean', description: 'delete 时同删站点根目录, 默认 false' },
       delete_database: { type: 'boolean', description: 'delete 时同删对应数据库, 默认 false' },
       delete_ftp: { type: 'boolean', description: 'delete 时同删 FTP 账户, 默认 false' },
@@ -206,7 +217,15 @@ registerTool({
   dangerous: true,
   confirm(args) {
     const action = String(args.action ?? '');
-    const ident = args.site_name ?? `#${args.site_id ?? '?'}`;
+    const ident = args.domain ?? args.site_name ?? `#${args.site_id ?? '?'}`;
+    if (action === 'create') {
+      const php = args.php_version === '' || args.php_version === '0' ? '静态' : `PHP ${args.php_version ?? '?'}`;
+      const dbHint = args.create_database === true ? ` + 建 DB(${args.db_user ?? '?'})` : '';
+      return {
+        summary: `宝塔 新建站点 ${ident} (${php}, port ${args.port ?? 80})${dbHint}`,
+        details: JSON.stringify({ ...args, db_password: args.db_password ? '***' : undefined }, null, 2),
+      };
+    }
     if (action === 'set_php') {
       return { summary: `宝塔 set_php 站点 ${ident} → PHP ${args.php_version ?? '?'}`, details: JSON.stringify(args, null, 2) };
     }
@@ -224,9 +243,77 @@ registerTool({
     const guard = ensureEnabled();
     if (guard) return guard;
     const action = String(args.action ?? '');
-    if (!['start', 'stop', 'set_php', 'delete'].includes(action)) {
+    if (!['create', 'start', 'stop', 'set_php', 'delete'].includes(action)) {
       return { ok: false, content: `unknown action: ${action}` };
     }
+
+    if (action === 'create') {
+      const domain =
+        (typeof args.domain === 'string' && args.domain.trim()) ||
+        (typeof args.site_name === 'string' && args.site_name.trim()) ||
+        '';
+      if (!domain) return { ok: false, content: 'create 需 domain (或 site_name)' };
+      if (!/^[a-zA-Z0-9.\-_*]+$/.test(domain)) return { ok: false, content: `domain 含非法字符: ${domain}` };
+      const phpVersion = typeof args.php_version === 'string' ? args.php_version : '';
+      if (args.php_version === undefined) return { ok: false, content: 'create 需 php_version ("0"/""=静态)' };
+      const port = Math.min(65_535, Math.max(1, Number(args.port) || 80));
+      const ps = typeof args.ps === 'string' && args.ps ? args.ps : domain;
+      const sitePath =
+        typeof args.path === 'string' && args.path ? args.path : `/www/wwwroot/${domain}`;
+      const extras =
+        typeof args.domains_extra === 'string'
+          ? args.domains_extra
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
+      const domainList = [domain, ...extras];
+
+      const createDb = args.create_database === true;
+      const dbUser = typeof args.db_user === 'string' ? args.db_user.trim() : '';
+      const dbPassword = typeof args.db_password === 'string' ? args.db_password : '';
+      if (createDb) {
+        if (!dbUser || !/^[a-zA-Z][a-zA-Z0-9_]{2,31}$/.test(dbUser)) {
+          return { ok: false, content: 'create_database=true 需 db_user (字母开头, 3-32 位)' };
+        }
+        if (!dbPassword || dbPassword.length < 8) {
+          return { ok: false, content: 'create_database=true 需 db_password (≥8 位)' };
+        }
+      }
+
+      const webname = JSON.stringify({ domain, domainlist: extras, count: 0 });
+      const params: Record<string, string | number> = {
+        webname,
+        type: 'PHP',
+        port: String(port),
+        ps,
+        path: sitePath,
+        type_id: '0',
+        version: phpVersion,
+        ftp: 'false',
+        ftp_username: '',
+        ftp_password: '',
+        sql: createDb ? 'MySQL' : 'false',
+        codeing: 'utf8mb4',
+        datauser: createDb ? dbUser : '',
+        datapassword: createDb ? dbPassword : '',
+        dataAccess: '127.0.0.1',
+        set_ssl: '0',
+        force_ssl: '0',
+      };
+      try {
+        const data = await btRequest({ endpoint: '/site?action=AddSite', params });
+        const err = isErrorPayload(data);
+        if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
+        return {
+          ok: true,
+          content: `站点已创建: ${domain} (${domainList.join(', ')}) → ${sitePath}\n面板返回: ${JSON.stringify(data)}`,
+        };
+      } catch (err) {
+        return { ok: false, content: formatErr(err) };
+      }
+    }
+
     let siteId = args.site_id ? Number(args.site_id) : undefined;
     const siteName = typeof args.site_name === 'string' ? args.site_name : undefined;
     if (!siteId && !siteName) {
