@@ -14,6 +14,7 @@ OpenRouter-backed ops agent with Telegram bot adapter (planned) and CLI for ad-h
 | P5 | 宝塔 panel API client (bt_sites_list / bt_site_op / bt_db_list / bt_db_backup / bt_file_op / bt_ssl_check / bt_cron / bt_logs_recent) | done |
 | P6 | Cron watchdog + proactive alerts | todo |
 | P7 | systemd unit + install/update scripts | done |
+| P10 | 内置工具补全 (cert_check / http_probe / firewall_status / firewall_op / backup_create / process_kill) | done |
 
 ## Quick start
 
@@ -85,3 +86,16 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 | `bt_logs_recent` | tail access/error 日志 (`/www/wwwlogs/<domain>.log`) | no |
 
 需在 `.env` 配置 `BT_PANEL_URL` + `BT_API_KEY` (面板 → 设置 → API 接口, 并把本机 IP 加入白名单)。鉴权用 `md5(time + md5(api_key))`, 无第三方依赖。
+
+## 运维工具 (P10)
+
+| Tool | 作用 | Approval |
+| --- | --- | --- |
+| `cert_check` | 任意 host:port TLS 证书 (剩余天数/issuer/SAN/链长度) | no |
+| `http_probe` | GET/HEAD 任意 URL, 返 status + headers + body 前 N 字 | no |
+| `firewall_status` | ufw 规则 (含编号) + fail2ban jails / banned IP | no |
+| `firewall_op` | ufw allow/deny/delete + fail2ban unban/ban/reload | yes |
+| `backup_create` | tar.gz 业务目录 + 可选 db dump → BACKUP_DIR | yes |
+| `process_kill` | 按 pid 杀进程 (PROCESS_KILL_PROTECTED 兜底, 拒 pid<=100, 拒自身) | yes |
+
+环境变量在 `.env.example` 的 "P10 运维工具" 段。`firewall_*` / `process_kill` 需要 sudo 白名单 (`/etc/sudoers.d/ai-agent` 加 `ufw`, `fail2ban-client`, `kill`)。`backup_create` paths 仍受 `ALLOWED_PATHS` + `DENY_PATHS` 沙盒约束。`process_kill` 永远拒杀 `PROCESS_KILL_PROTECTED` 命中的进程名 (含 `BT-Panel` / `sshd` / `mysqld` / 本进程自身)。

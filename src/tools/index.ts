@@ -6,3 +6,8 @@ import './git.js';
 import './shell-rw.js';
 import './db.js';
 import './bt.js';
+import './cert.js';
+import './http.js';
+import './firewall.js';
+import './backup.js';
+import './process.js';

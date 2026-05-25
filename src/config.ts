@@ -50,6 +50,15 @@ const Schema = z.object({
   DB_QUERY_DEFAULT_LIMIT: z.coerce.number().int().positive().max(10_000).default(100),
   DB_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
+  BACKUP_DIR: z.string().default('/www/backup'),
+  BACKUP_MAX_SIZE_MB: z.coerce.number().int().positive().default(20_480),
+  HTTP_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  HTTP_PROBE_MAX_BYTES: z.coerce.number().int().positive().default(8_192),
+  HTTP_PROBE_ALLOW_PRIVATE: z.union([z.literal('true'), z.literal('false')]).default('true'),
+  PROCESS_KILL_PROTECTED: z.string().default(
+    'systemd,sshd,init,kernel,BT-Panel,BT-Task,ai-agent-bot,nginx,mysqld,mariadbd,postgres,redis-server,docker,containerd',
+  ),
+
   BT_PANEL_URL: z.string().default(''),
   BT_API_KEY: z.string().default(''),
   BT_API_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
@@ -164,6 +173,18 @@ export const config = {
     maxRows: env.DB_QUERY_MAX_ROWS,
     defaultLimit: env.DB_QUERY_DEFAULT_LIMIT,
     timeoutMs: env.DB_QUERY_TIMEOUT_MS,
+  },
+  backup: {
+    dir: path.resolve(env.BACKUP_DIR),
+    maxSizeMb: env.BACKUP_MAX_SIZE_MB,
+  },
+  httpProbe: {
+    timeoutMs: env.HTTP_PROBE_TIMEOUT_MS,
+    maxBytes: env.HTTP_PROBE_MAX_BYTES,
+    allowPrivate: env.HTTP_PROBE_ALLOW_PRIVATE === 'true',
+  },
+  processKill: {
+    protectedNames: csv(env.PROCESS_KILL_PROTECTED),
   },
   bt: {
     panelUrl: env.BT_PANEL_URL.replace(/\/+$/, ''),
