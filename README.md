@@ -82,8 +82,9 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 | `bt_db_backup` | 触发面板备份 | yes |
 | `bt_file_op` | read / write / mkdir (受 DENY_PATHS 限制) | yes |
 | `bt_ssl_check` | 查 SSL 有效期 (单站点或全部) | no |
-| `bt_cron` | list (add/delete 留下轮) | yes |
-| `bt_logs_recent` | tail access/error 日志 (`/www/wwwlogs/<domain>.log`) | no |
+| `bt_cron` | list / add_daily_shell / delete | yes |
+| `bt_ssl_renew` | LE 证书续签 / 覆盖申请 (单/多域名) | yes |
+| `bt_logs_recent` | tail access / error / php_slow / php_error 日志 | no |
 
 需在 `.env` 配置 `BT_PANEL_URL` + `BT_API_KEY` (面板 → 设置 → API 接口, 并把本机 IP 加入白名单)。鉴权用 `md5(time + md5(api_key))`, 无第三方依赖。
 

@@ -494,48 +494,200 @@ registerTool({
   },
 });
 
-// 7. bt_cron (list-only; add/delete 留下轮)
+// 7. bt_cron (list / add_daily_shell / delete)
 registerTool({
   name: 'bt_cron',
-  description: '宝塔计划任务管理. 当前仅支持 action=list (add/delete 留下轮). 走审批.',
+  description:
+    '宝塔计划任务管理. action: list | add_daily_shell | delete. list 只读, 其余走审批. ' +
+    'add_daily_shell 接 { name, hour, minute, command, save? } 创建每日 shell 任务 (复杂调度请用 shell_rw 直接写 crontab).',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['list'] },
+      action: { type: 'string', enum: ['list', 'add_daily_shell', 'delete'] },
       page: { type: 'integer' },
       limit: { type: 'integer' },
       search: { type: 'string' },
+      name: { type: 'string', description: 'add_daily_shell 时的任务名' },
+      hour: { type: 'integer', description: '0-23' },
+      minute: { type: 'integer', description: '0-59' },
+      command: { type: 'string', description: 'add_daily_shell 时的 shell 命令 (单行或多行)' },
+      save: { type: 'integer', description: 'add_daily_shell 时日志保留份数, 默认 3' },
+      id: { type: 'integer', description: 'delete 时的任务 id' },
     },
     required: ['action'],
     additionalProperties: false,
   },
   dangerous: true,
   confirm(args) {
-    return { summary: `宝塔 ${args.action} 计划任务`, details: JSON.stringify(args, null, 2) };
+    const a = String(args.action ?? '');
+    if (a === 'add_daily_shell') {
+      return {
+        summary: `宝塔 add cron 每日 ${args.hour ?? '?'}:${String(args.minute ?? 0).padStart(2, '0')} → ${args.name ?? '?'}`,
+        details: JSON.stringify(args, null, 2),
+      };
+    }
+    if (a === 'delete') {
+      return { summary: `宝塔 delete cron #${args.id ?? '?'}`, details: JSON.stringify(args, null, 2) };
+    }
+    return { summary: `宝塔 ${a} 计划任务`, details: JSON.stringify(args, null, 2) };
   },
   async handler(args): Promise<ToolResult> {
     const guard = ensureEnabled();
     if (guard) return guard;
-    if (args.action !== 'list') {
-      return { ok: false, content: 'add/delete 暂未实现, 仅支持 list' };
+    const action = String(args.action ?? '');
+
+    if (action === 'list') {
+      const page = Math.max(1, Number(args.page) || 1);
+      const limit = Math.min(200, Math.max(1, Number(args.limit) || 20));
+      const search = typeof args.search === 'string' ? args.search : '';
+      try {
+        const data = await btRequest({
+          endpoint: '/data?action=getData',
+          params: { table: 'crontab', p: page, limit, search },
+        });
+        const err = isErrorPayload(data);
+        if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
+        const rows = asArray(data);
+        const lines = rows.map((r) => {
+          const enabled = r.status === '1' || r.status === 1;
+          return `[#${r.id}] ${r.name} | type:${r.type ?? '-'} | sName:${r.sName ?? '-'} | status:${enabled ? '启用' : '禁用'} | ps:${r.ps ?? '-'}`;
+        });
+        const t = truncate([`共 ${rows.length} 任务`, ...lines].join('\n'));
+        return { ok: true, content: t.content, truncated: t.truncated };
+      } catch (err) {
+        return { ok: false, content: formatErr(err) };
+      }
     }
-    const page = Math.max(1, Number(args.page) || 1);
-    const limit = Math.min(200, Math.max(1, Number(args.limit) || 20));
-    const search = typeof args.search === 'string' ? args.search : '';
+
+    if (action === 'add_daily_shell') {
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      const command = typeof args.command === 'string' ? args.command : '';
+      const hour = Number(args.hour);
+      const minute = Number(args.minute ?? 0);
+      const save = Math.min(100, Math.max(1, Number(args.save) || 3));
+      if (!name) return { ok: false, content: 'name required' };
+      if (!command) return { ok: false, content: 'command required' };
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { ok: false, content: 'hour 必须 0-23' };
+      if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
+        return { ok: false, content: 'minute 必须 0-59' };
+      }
+      try {
+        const data = await btRequest({
+          endpoint: '/crontab?action=AddCrontab',
+          params: {
+            name,
+            type: 'day',
+            where1: '',
+            hour: String(hour),
+            minute: String(minute),
+            sType: 'toShell',
+            sName: '',
+            sBody: command,
+            backupTo: 'localhost',
+            save: String(save),
+            urladdress: '',
+          },
+        });
+        const err = isErrorPayload(data);
+        if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
+        return {
+          ok: true,
+          content: `cron 已添加: ${name} 每日 ${hour}:${String(minute).padStart(2, '0')}\n面板返回: ${JSON.stringify(data)}`,
+        };
+      } catch (err) {
+        return { ok: false, content: formatErr(err) };
+      }
+    }
+
+    if (action === 'delete') {
+      const id = Number(args.id);
+      if (!Number.isInteger(id) || id <= 0) return { ok: false, content: 'id 必须为正整数' };
+      try {
+        const data = await btRequest({
+          endpoint: '/crontab?action=DelCrontab',
+          params: { id: String(id) },
+        });
+        const err = isErrorPayload(data);
+        if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
+        return { ok: true, content: `cron #${id} 已删除\n面板返回: ${JSON.stringify(data)}` };
+      } catch (err) {
+        return { ok: false, content: formatErr(err) };
+      }
+    }
+
+    return { ok: false, content: `unknown action: ${action}` };
+  },
+});
+
+// 9. bt_ssl_renew (dangerous; LE 续签 / 覆盖申请)
+registerTool({
+  name: 'bt_ssl_renew',
+  description:
+    '宝塔 Let\'s Encrypt 证书续签 / 覆盖申请. 走审批. 必填 site_name; domains 默认 = site_name (如需多域名 csv: "a.com,www.a.com"). force=true 覆盖现有证书.',
+  parameters: {
+    type: 'object',
+    properties: {
+      site_name: { type: 'string', description: '宝塔站点 domain (主域)' },
+      domains: { type: 'string', description: '逗号分隔的全部待签域名, 默认 = site_name' },
+      auth_type: { type: 'string', enum: ['http', 'dns'], description: '默认 http (file challenge)' },
+      force: { type: 'boolean', description: 'true 覆盖现证书, 默认 true' },
+    },
+    required: ['site_name'],
+    additionalProperties: false,
+  },
+  dangerous: true,
+  confirm(args) {
+    return {
+      summary: `宝塔 LE 续签 ${args.site_name}${args.domains ? ` (${args.domains})` : ''}`,
+      details: JSON.stringify(args, null, 2),
+    };
+  },
+  async handler(args): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const siteName = typeof args.site_name === 'string' ? args.site_name.trim() : '';
+    if (!siteName) return { ok: false, content: 'site_name required' };
+    const domainsRaw = typeof args.domains === 'string' && args.domains ? args.domains : siteName;
+    const domains = domainsRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (domains.length === 0) return { ok: false, content: 'domains 为空' };
+    const authType = args.auth_type === 'dns' ? 'dns' : 'http';
+    const force = args.force === undefined ? true : args.force === true;
+
+    let siteId: number | null = null;
     try {
       const data = await btRequest({
         endpoint: '/data?action=getData',
-        params: { table: 'crontab', p: page, limit, search },
+        params: { table: 'sites', p: 1, limit: 200, search: siteName },
+      });
+      const rows = asArray(data);
+      const found = rows.find((r) => r.name === siteName);
+      if (!found) return { ok: false, content: `站点未找到: ${siteName}` };
+      siteId = Number(found.id);
+    } catch (err) {
+      return { ok: false, content: formatErr(err) };
+    }
+
+    try {
+      const data = await btRequest({
+        endpoint: '/acme?action=apply_cert_api',
+        params: {
+          domains: JSON.stringify(domains),
+          auth_to: siteName,
+          auth_type: authType,
+          id: String(siteId),
+          force: force ? '1' : '0',
+          renew: '1',
+        },
       });
       const err = isErrorPayload(data);
       if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
-      const rows = asArray(data);
-      const lines = rows.map((r) => {
-        const enabled = r.status === '1' || r.status === 1;
-        return `[#${r.id}] ${r.name} | type:${r.type ?? '-'} | sName:${r.sName ?? '-'} | status:${enabled ? '启用' : '禁用'} | ps:${r.ps ?? '-'}`;
-      });
-      const t = truncate([`共 ${rows.length} 任务`, ...lines].join('\n'));
-      return { ok: true, content: t.content, truncated: t.truncated };
+      return {
+        ok: true,
+        content: `LE 续签触发成功: ${siteName} (domains: ${domains.join(',')})\n面板返回: ${JSON.stringify(data)}`,
+      };
     } catch (err) {
       return { ok: false, content: formatErr(err) };
     }
@@ -543,32 +695,76 @@ registerTool({
 });
 
 // 8. bt_logs_recent (read-only)
+//
+// type:
+//   access     → /www/wwwlogs/<site>.log         (nginx site access)
+//   error      → /www/wwwlogs/<site>.log.wf      (nginx site error)
+//   php_slow   → /www/server/php/<php_version>/var/log/slow.log
+//   php_error  → /www/server/php/<php_version>/var/log/php-fpm.log
+//
+// php_* 需要 php_version (如 "74" / "80" / "81"). 不给则自动从站点信息查.
 registerTool({
   name: 'bt_logs_recent',
   description:
-    '读宝塔站点的 access 或 error 日志, 取尾部 N 行. type=access|error. lines 默认 100, 最大 1000. 仅支持默认 /www/wwwlogs 路径布局.',
+    '读宝塔日志 tail. type: access | error | php_slow | php_error. access/error 需 site_name; php_* 需 php_version (留空则按 site_name 从站点查). lines 默认 100, 最大 1000.',
   parameters: {
     type: 'object',
     properties: {
-      site_name: { type: 'string', description: '站点 domain' },
-      type: { type: 'string', enum: ['access', 'error'] },
+      site_name: { type: 'string', description: '站点 domain (access/error 必填; php_* 留空则不自动定位 PHP 版本)' },
+      type: { type: 'string', enum: ['access', 'error', 'php_slow', 'php_error'] },
+      php_version: { type: 'string', description: 'PHP 版本号, 如 74 / 80 / 81 (php_* 时优先于 site_name 自动定位)' },
       lines: { type: 'integer', description: '尾部行数, 默认 100, 最大 1000' },
     },
-    required: ['site_name', 'type'],
+    required: ['type'],
     additionalProperties: false,
   },
   async handler(args): Promise<ToolResult> {
     const guard = ensureEnabled();
     if (guard) return guard;
-    const siteName = String(args.site_name ?? '');
+    const siteName = typeof args.site_name === 'string' ? args.site_name.trim() : '';
     const type = String(args.type ?? '');
     const lines = Math.min(1000, Math.max(1, Number(args.lines) || 100));
-    if (!siteName) return { ok: false, content: 'site_name required' };
-    if (type !== 'access' && type !== 'error') {
-      return { ok: false, content: 'type must be access|error' };
+    let phpVersion = typeof args.php_version === 'string' ? args.php_version.trim() : '';
+
+    if (!['access', 'error', 'php_slow', 'php_error'].includes(type)) {
+      return { ok: false, content: `unknown type: ${type}` };
     }
-    const logPath =
-      type === 'access' ? `/www/wwwlogs/${siteName}.log` : `/www/wwwlogs/${siteName}.log.wf`;
+
+    let logPath: string;
+    if (type === 'access' || type === 'error') {
+      if (!siteName) return { ok: false, content: 'site_name required for access/error' };
+      logPath = type === 'access' ? `/www/wwwlogs/${siteName}.log` : `/www/wwwlogs/${siteName}.log.wf`;
+    } else {
+      if (!phpVersion && siteName) {
+        try {
+          const data = await btRequest({
+            endpoint: '/data?action=getData',
+            params: { table: 'sites', p: 1, limit: 200, search: siteName },
+          });
+          const rows = asArray(data);
+          const found = rows.find((r) => r.name === siteName);
+          if (found && typeof found.php_version === 'string') {
+            phpVersion = found.php_version.replace(/\./g, '');
+          }
+        } catch {
+          /* 忽略, 下面会要求显式 php_version */
+        }
+      }
+      if (!phpVersion) {
+        return {
+          ok: false,
+          content: 'php_* 类型需 php_version (如 "74" / "80" / "81"), 或提供 site_name 让 agent 自动从站点查',
+        };
+      }
+      if (!/^\d{2,3}$/.test(phpVersion)) {
+        return { ok: false, content: `php_version 格式错: ${phpVersion} (期望纯数字如 74/80/81)` };
+      }
+      logPath =
+        type === 'php_slow'
+          ? `/www/server/php/${phpVersion}/var/log/slow.log`
+          : `/www/server/php/${phpVersion}/var/log/php-fpm.log`;
+    }
+
     const deny = checkBtPath(logPath);
     if (deny) return { ok: false, content: deny };
     try {
@@ -577,7 +773,7 @@ registerTool({
         params: { path: logPath },
       });
       const err = isErrorPayload(data);
-      if (err.error) return { ok: false, content: `bt api error: ${err.msg}` };
+      if (err.error) return { ok: false, content: `bt api error: ${err.msg} (path: ${logPath})` };
       const text = String((data as { data?: string }).data ?? '');
       const all = text.split(/\r?\n/);
       const tail = all.slice(-lines).join('\n');
