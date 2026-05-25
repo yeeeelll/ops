@@ -184,14 +184,21 @@ registerTool({
 registerTool({
   name: 'bt_site_op',
   description:
-    '对宝塔站点执行启停或修改 PHP 版本. 需审批. action: start | stop | set_php. 提供 site_id 或 site_name 之一. set_php 时 php_version 必填 (如 "74" / "80" / "81").',
+    '宝塔站点操作. 需审批. action: start | stop | set_php | delete. ' +
+    'set_php 需 php_version (如 "74" / "80" / "81"). ' +
+    'delete 删站点; 默认仅删面板记录 + vhost 配置, 站点目录 / 数据库 / FTP 保留. ' +
+    '同时删需显式 delete_path=true / delete_database=true / delete_ftp=true. ' +
+    '宝塔会自动 chattr -i .user.ini 后清理 (走 panel API, 不需要本机 sudo).',
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['start', 'stop', 'set_php'] },
+      action: { type: 'string', enum: ['start', 'stop', 'set_php', 'delete'] },
       site_id: { type: 'integer', description: '站点 id (来自 bt_sites_list)' },
       site_name: { type: 'string', description: '站点 domain, 如 example.com' },
       php_version: { type: 'string', description: 'set_php 时必填' },
+      delete_path: { type: 'boolean', description: 'delete 时同删站点根目录, 默认 false' },
+      delete_database: { type: 'boolean', description: 'delete 时同删对应数据库, 默认 false' },
+      delete_ftp: { type: 'boolean', description: 'delete 时同删 FTP 账户, 默认 false' },
     },
     required: ['action'],
     additionalProperties: false,
@@ -200,17 +207,24 @@ registerTool({
   confirm(args) {
     const action = String(args.action ?? '');
     const ident = args.site_name ?? `#${args.site_id ?? '?'}`;
-    const phpInfo = action === 'set_php' ? ` → PHP ${args.php_version ?? '?'}` : '';
-    return {
-      summary: `宝塔 ${action} 站点 ${ident}${phpInfo}`,
-      details: JSON.stringify(args, null, 2),
-    };
+    if (action === 'set_php') {
+      return { summary: `宝塔 set_php 站点 ${ident} → PHP ${args.php_version ?? '?'}`, details: JSON.stringify(args, null, 2) };
+    }
+    if (action === 'delete') {
+      const extras: string[] = [];
+      if (args.delete_path === true) extras.push('站点目录');
+      if (args.delete_database === true) extras.push('数据库');
+      if (args.delete_ftp === true) extras.push('FTP');
+      const tail = extras.length > 0 ? ` + 同删 [${extras.join(', ')}]` : ' (仅删面板记录 + vhost)';
+      return { summary: `⚠ 删除站点 ${ident}${tail}`, details: JSON.stringify(args, null, 2) };
+    }
+    return { summary: `宝塔 ${action} 站点 ${ident}`, details: JSON.stringify(args, null, 2) };
   },
   async handler(args): Promise<ToolResult> {
     const guard = ensureEnabled();
     if (guard) return guard;
     const action = String(args.action ?? '');
-    if (!['start', 'stop', 'set_php'].includes(action)) {
+    if (!['start', 'stop', 'set_php', 'delete'].includes(action)) {
       return { ok: false, content: `unknown action: ${action}` };
     }
     let siteId = args.site_id ? Number(args.site_id) : undefined;
@@ -243,11 +257,19 @@ registerTool({
         endpoint = '/site?action=SiteStop';
         params.id = siteId!;
         params.name = siteName ?? '';
-      } else {
+      } else if (action === 'set_php') {
         if (!args.php_version) return { ok: false, content: 'set_php 需提供 php_version' };
         endpoint = '/site?action=SetPHPVersion';
         params.siteName = siteName ?? '';
         params.version = String(args.php_version);
+      } else {
+        // delete
+        endpoint = '/site?action=DeleteSite';
+        params.id = siteId!;
+        params.webname = siteName ?? '';
+        params.path = args.delete_path === true ? '1' : '0';
+        params.database = args.delete_database === true ? '1' : '0';
+        params.ftp = args.delete_ftp === true ? '1' : '0';
       }
       const data = await btRequest({ endpoint, params });
       const err = isErrorPayload(data);
