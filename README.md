@@ -85,6 +85,11 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 | `bt_cron` | list / add_daily_shell / delete | yes |
 | `bt_ssl_renew` | LE 证书续签 / 覆盖申请 (单/多域名) | yes |
 | `bt_logs_recent` | tail access / error / php_slow / php_error 日志 | no |
+| `bt_waf_status` | 免费 WAF (btwaf) 总开关 + 规则 + 永久封禁 IP + 站点级覆盖 | no |
+| `bt_waf_block_ip` | 加 IP 到 `drop_ip.json` + reload nginx | yes |
+| `bt_waf_unblock_ip` | 移除 IP + reload nginx | yes |
+| `bt_waf_logs` | tail `total_logs/<date>/<site>.log` 拦截日志 | no |
+| `bt_waf_rule_toggle` | 切 sql/xss/cc/scan/... 规则 + reload nginx | yes |
 
 需在 `.env` 配置 `BT_PANEL_URL` + `BT_API_KEY` (面板 → 设置 → API 接口, 并把本机 IP 加入白名单)。鉴权用 `md5(time + md5(api_key))`, 无第三方依赖。
 

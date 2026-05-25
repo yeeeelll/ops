@@ -785,4 +785,423 @@ registerTool({
   },
 });
 
+// ============================================================
+// 宝塔免费 WAF (btwaf) — /www/server/btwaf/*.json
+// ============================================================
+
+import net from 'node:net';
+
+const WAF_DIR = '/www/server/btwaf';
+const WAF_TOTAL_JSON = `${WAF_DIR}/total.json`;
+const WAF_DROP_IP_JSON = `${WAF_DIR}/drop_ip.json`;
+const WAF_SITE_JSON = `${WAF_DIR}/site.json`;
+const WAF_LOGS_DIR = `${WAF_DIR}/total_logs`;
+
+const WAF_TOGGLE_KEYS = new Set([
+  'switch',
+  'log',
+  'scan',
+  'sql',
+  'xss',
+  'args_check',
+  'url_check',
+  'user_agent_check',
+  'cookie_check',
+  'post_check',
+  'header_check',
+  'file_upload_check',
+  'cc',
+  'retry',
+]);
+
+function isValidIp(ip: string): boolean {
+  return net.isIP(ip) > 0;
+}
+
+function todayStr(): string {
+  const d = new Date();
+  const z = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+
+async function btReadFile(path: string): Promise<{ ok: true; text: string } | { ok: false; msg: string }> {
+  try {
+    const data = await btRequest({ endpoint: '/files?action=GetFileBody', params: { path } });
+    const err = isErrorPayload(data);
+    if (err.error) return { ok: false, msg: err.msg };
+    const text = String((data as { data?: string }).data ?? '');
+    return { ok: true, text };
+  } catch (err) {
+    return { ok: false, msg: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function btWriteFile(path: string, content: string): Promise<{ ok: boolean; msg: string }> {
+  try {
+    const data = await btRequest({
+      endpoint: '/files?action=SaveFileBody',
+      params: { path, data: content, encoding: 'utf-8' },
+    });
+    const err = isErrorPayload(data);
+    if (err.error) return { ok: false, msg: err.msg };
+    return { ok: true, msg: 'saved' };
+  } catch (err) {
+    return { ok: false, msg: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function reloadNginx(): Promise<{ ok: boolean; msg: string }> {
+  try {
+    const data = await btRequest({
+      endpoint: '/system?action=ServiceAdmin',
+      params: { name: 'nginx', type: 'reload' },
+    });
+    const err = isErrorPayload(data);
+    if (err.error) return { ok: false, msg: err.msg };
+    return { ok: true, msg: JSON.stringify(data) };
+  } catch (err) {
+    return { ok: false, msg: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+interface DropIpRecord {
+  ip: string;
+  ts: number;
+  ttl?: number;
+  raw: unknown;
+}
+
+function parseDropIp(text: string): DropIpRecord[] {
+  if (!text.trim()) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((x): x is string => typeof x === 'string')
+        .map((ip) => ({ ip, ts: 0, raw: ip }));
+    }
+    if (typeof parsed === 'object' && parsed !== null) {
+      const out: DropIpRecord[] = [];
+      for (const [ip, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'number') out.push({ ip, ts: v, raw: v });
+        else if (typeof v === 'object' && v !== null) {
+          const obj = v as Record<string, unknown>;
+          const ts = typeof obj.time === 'number' ? obj.time : 0;
+          const ttl = typeof obj.ttl === 'number' ? obj.ttl : undefined;
+          out.push({ ip, ts, ttl, raw: v });
+        } else {
+          out.push({ ip, ts: 0, raw: v });
+        }
+      }
+      return out;
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+  return [];
+}
+
+function serializeDropIp(records: DropIpRecord[], originalText: string): string {
+  let wasArray = false;
+  try {
+    if (originalText.trim()) {
+      const parsed = JSON.parse(originalText);
+      wasArray = Array.isArray(parsed);
+    } else {
+      wasArray = true;
+    }
+  } catch {
+    wasArray = true;
+  }
+  if (wasArray) {
+    return JSON.stringify(records.map((r) => r.ip), null, 2);
+  }
+  const obj: Record<string, unknown> = {};
+  for (const r of records) obj[r.ip] = r.raw;
+  return JSON.stringify(obj, null, 2);
+}
+
+// 10. bt_waf_status (read-only)
+registerTool({
+  name: 'bt_waf_status',
+  description:
+    '宝塔免费 WAF (btwaf) 状态: 总开关 + 各规则开关 + 永久封禁 IP 列表 + 站点级覆盖. 只读.',
+  parameters: { type: 'object', properties: {}, additionalProperties: false },
+  async handler(): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const totalR = await btReadFile(WAF_TOTAL_JSON);
+    const dropR = await btReadFile(WAF_DROP_IP_JSON);
+    const siteR = await btReadFile(WAF_SITE_JSON);
+
+    const lines: string[] = [`# bt WAF status (${WAF_DIR})`];
+
+    if (totalR.ok) {
+      try {
+        const total = JSON.parse(totalR.text) as Record<string, unknown>;
+        lines.push('--- total.json ---');
+        for (const key of [
+          'switch',
+          'log',
+          'sql',
+          'xss',
+          'scan',
+          'cc',
+          'cc_mode',
+          'cc_count',
+          'cc_period',
+          'args_check',
+          'url_check',
+          'user_agent_check',
+          'cookie_check',
+          'post_check',
+          'header_check',
+          'file_upload_check',
+        ]) {
+          if (key in total) lines.push(`  ${key}: ${JSON.stringify(total[key])}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lines.push(`(total.json 解析失败: ${msg})`);
+      }
+    } else {
+      lines.push(`(total.json 读失败: ${totalR.msg})`);
+    }
+
+    if (dropR.ok) {
+      const records = parseDropIp(dropR.text);
+      lines.push('--- drop_ip.json (永久封禁) ---');
+      lines.push(`共 ${records.length} 条`);
+      const preview = records.slice(0, 50);
+      for (const r of preview) {
+        const when = r.ts > 0 ? new Date(r.ts * (r.ts > 9_999_999_999 ? 1 : 1000)).toISOString() : '-';
+        lines.push(`  ${r.ip}  封禁时间:${when}${r.ttl ? `  ttl:${r.ttl}s` : ''}`);
+      }
+      if (records.length > preview.length) lines.push(`  ... 还有 ${records.length - preview.length} 条`);
+    } else {
+      lines.push(`(drop_ip.json 读失败: ${dropR.msg})`);
+    }
+
+    if (siteR.ok) {
+      try {
+        const site = JSON.parse(siteR.text) as Record<string, unknown>;
+        const siteNames = Object.keys(site).filter((k) => k !== 'all');
+        lines.push('--- site.json ---');
+        lines.push(`含站点级覆盖: ${siteNames.length} 个站点 (${siteNames.slice(0, 10).join(', ')}${siteNames.length > 10 ? '...' : ''})`);
+      } catch {
+        /* skip */
+      }
+    }
+
+    const t = truncate(lines.join('\n'));
+    return { ok: true, content: t.content, truncated: t.truncated };
+  },
+});
+
+// 11. bt_waf_block_ip (dangerous)
+registerTool({
+  name: 'bt_waf_block_ip',
+  description:
+    '把 IP 加入 WAF 永久封禁列表 (drop_ip.json) 并 reload nginx. 走审批. 支持 IPv4/IPv6.',
+  parameters: {
+    type: 'object',
+    properties: {
+      ip: { type: 'string', description: '要封禁的 IP' },
+    },
+    required: ['ip'],
+    additionalProperties: false,
+  },
+  dangerous: true,
+  confirm(args) {
+    return { summary: `WAF 封禁 IP ${args.ip}`, details: JSON.stringify(args, null, 2) };
+  },
+  async handler(args): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const ip = typeof args.ip === 'string' ? args.ip.trim() : '';
+    if (!ip || !isValidIp(ip)) return { ok: false, content: `invalid ip: ${ip}` };
+    const dropR = await btReadFile(WAF_DROP_IP_JSON);
+    const originalText = dropR.ok ? dropR.text : '[]';
+    const records = parseDropIp(originalText);
+    if (records.find((r) => r.ip === ip)) {
+      return { ok: true, content: `${ip} 已在封禁列表, 无操作` };
+    }
+    const now = Math.floor(Date.now() / 1000);
+    records.push({ ip, ts: now, raw: now });
+    const serialized = serializeDropIp(records, originalText);
+    const writeR = await btWriteFile(WAF_DROP_IP_JSON, serialized);
+    if (!writeR.ok) return { ok: false, content: `写 drop_ip.json 失败: ${writeR.msg}` };
+    const reload = await reloadNginx();
+    if (!reload.ok) {
+      return {
+        ok: false,
+        content: `已写 drop_ip.json 但 reload nginx 失败: ${reload.msg}\n请手动 systemctl reload nginx 让规则生效`,
+      };
+    }
+    return { ok: true, content: `已封禁 ${ip} + reload nginx 成功 (共 ${records.length} 条永久封禁)` };
+  },
+});
+
+// 12. bt_waf_unblock_ip (dangerous)
+registerTool({
+  name: 'bt_waf_unblock_ip',
+  description: '从 WAF 永久封禁列表移除 IP 并 reload nginx. 走审批.',
+  parameters: {
+    type: 'object',
+    properties: {
+      ip: { type: 'string', description: '要解封的 IP' },
+    },
+    required: ['ip'],
+    additionalProperties: false,
+  },
+  dangerous: true,
+  confirm(args) {
+    return { summary: `WAF 解封 IP ${args.ip}`, details: JSON.stringify(args, null, 2) };
+  },
+  async handler(args): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const ip = typeof args.ip === 'string' ? args.ip.trim() : '';
+    if (!ip || !isValidIp(ip)) return { ok: false, content: `invalid ip: ${ip}` };
+    const dropR = await btReadFile(WAF_DROP_IP_JSON);
+    if (!dropR.ok) return { ok: false, content: `读 drop_ip.json 失败: ${dropR.msg}` };
+    const records = parseDropIp(dropR.text);
+    const filtered = records.filter((r) => r.ip !== ip);
+    if (filtered.length === records.length) {
+      return { ok: true, content: `${ip} 不在封禁列表, 无操作` };
+    }
+    const serialized = serializeDropIp(filtered, dropR.text);
+    const writeR = await btWriteFile(WAF_DROP_IP_JSON, serialized);
+    if (!writeR.ok) return { ok: false, content: `写 drop_ip.json 失败: ${writeR.msg}` };
+    const reload = await reloadNginx();
+    if (!reload.ok) {
+      return {
+        ok: false,
+        content: `已写 drop_ip.json 但 reload nginx 失败: ${reload.msg}\n请手动 systemctl reload nginx`,
+      };
+    }
+    return { ok: true, content: `已解封 ${ip} + reload nginx 成功 (剩 ${filtered.length} 条永久封禁)` };
+  },
+});
+
+// 13. bt_waf_logs (read-only)
+registerTool({
+  name: 'bt_waf_logs',
+  description:
+    '读 WAF 拦截日志 tail. site_name=指定站点, 留空 = 当日全站点. date 形如 2026-05-25, 默认今天. lines 默认 100 最大 1000.',
+  parameters: {
+    type: 'object',
+    properties: {
+      site_name: { type: 'string' },
+      date: { type: 'string', description: 'YYYY-MM-DD, 默认今天' },
+      lines: { type: 'integer' },
+    },
+    additionalProperties: false,
+  },
+  async handler(args): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const siteName = typeof args.site_name === 'string' ? args.site_name.trim() : '';
+    const dateArg = typeof args.date === 'string' ? args.date.trim() : '';
+    const date = dateArg || todayStr();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return { ok: false, content: `date 格式错: ${date} (期望 YYYY-MM-DD)` };
+    }
+    const lines = Math.min(1000, Math.max(1, Number(args.lines) || 100));
+    const dayDir = `${WAF_LOGS_DIR}/${date}`;
+
+    const allText: string[] = [];
+    if (siteName) {
+      const path = `${dayDir}/${siteName}.log`;
+      const r = await btReadFile(path);
+      if (!r.ok) return { ok: false, content: `读 ${path} 失败: ${r.msg}` };
+      allText.push(`# ${path}`, r.text);
+    } else {
+      // list day dir
+      try {
+        const listResp = await btRequest({
+          endpoint: '/files?action=GetDir',
+          params: { path: dayDir },
+        });
+        const eErr = isErrorPayload(listResp);
+        if (eErr.error) return { ok: false, content: `读 ${dayDir} 失败: ${eErr.msg}` };
+        const files = (listResp as { DIR?: unknown[]; FILES?: unknown[] }).FILES ?? [];
+        const logFiles = (files as unknown[])
+          .map((f) => String(f).split(';')[0] ?? '')
+          .filter((f) => f.length > 0 && f.endsWith('.log'));
+        if (logFiles.length === 0) {
+          return { ok: true, content: `${dayDir} 无日志文件` };
+        }
+        for (const f of logFiles.slice(0, 10)) {
+          const r = await btReadFile(`${dayDir}/${f}`);
+          if (r.ok) allText.push(`# ${f}`, r.text);
+        }
+      } catch (err) {
+        return { ok: false, content: formatErr(err) };
+      }
+    }
+
+    const merged = allText.join('\n').split(/\r?\n/);
+    const tail = merged.slice(-lines).join('\n');
+    const t = truncate(`# WAF logs ${date}${siteName ? ` (site: ${siteName})` : ''} (last ${lines} lines)\n${tail}`);
+    return { ok: true, content: t.content, truncated: t.truncated };
+  },
+});
+
+// 14. bt_waf_rule_toggle (dangerous)
+registerTool({
+  name: 'bt_waf_rule_toggle',
+  description:
+    '切换 WAF 规则开关 (total.json). key ∈ {switch, log, sql, xss, scan, cc, args_check, url_check, user_agent_check, cookie_check, post_check, header_check, file_upload_check, retry}. value: true|false. 走审批, 自动 reload nginx.',
+  parameters: {
+    type: 'object',
+    properties: {
+      key: { type: 'string' },
+      value: { type: 'boolean' },
+    },
+    required: ['key', 'value'],
+    additionalProperties: false,
+  },
+  dangerous: true,
+  confirm(args) {
+    return { summary: `WAF 规则 ${args.key}=${args.value}`, details: JSON.stringify(args, null, 2) };
+  },
+  async handler(args): Promise<ToolResult> {
+    const guard = ensureEnabled();
+    if (guard) return guard;
+    const key = typeof args.key === 'string' ? args.key.trim() : '';
+    const value = args.value === true;
+    if (!WAF_TOGGLE_KEYS.has(key)) {
+      return {
+        ok: false,
+        content: `unknown key: ${key} (允许: ${[...WAF_TOGGLE_KEYS].join(', ')})`,
+      };
+    }
+    const totalR = await btReadFile(WAF_TOTAL_JSON);
+    if (!totalR.ok) return { ok: false, content: `读 total.json 失败: ${totalR.msg}` };
+    let total: Record<string, unknown>;
+    try {
+      total = JSON.parse(totalR.text) as Record<string, unknown>;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, content: `total.json 解析失败: ${msg}` };
+    }
+    const before = total[key];
+    total[key] = value;
+    const writeR = await btWriteFile(WAF_TOTAL_JSON, JSON.stringify(total, null, 2));
+    if (!writeR.ok) return { ok: false, content: `写 total.json 失败: ${writeR.msg}` };
+    const reload = await reloadNginx();
+    if (!reload.ok) {
+      return {
+        ok: false,
+        content: `已写 total.json 但 reload nginx 失败: ${reload.msg}\n请手动 systemctl reload nginx`,
+      };
+    }
+    return {
+      ok: true,
+      content: `WAF ${key}: ${JSON.stringify(before)} → ${JSON.stringify(value)} + reload nginx 成功`,
+    };
+  },
+});
+
 logger.debug('bt tools loaded');
