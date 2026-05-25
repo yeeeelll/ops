@@ -85,6 +85,8 @@ Reference: this loop mirrors Claude Code's agent loop — LLM call → tool disp
 | `bt_cron` | list / add_daily_shell / delete | yes |
 | `bt_ssl_renew` | LE 证书续签 / 覆盖申请 (单/多域名) | yes |
 | `bt_logs_recent` | tail access / error / php_slow / php_error 日志 | no |
+| `bt_waf_status` | 读 total.json + drop_ip.json + site.json (规则开关 + 永久黑名单 + 站点级覆盖) | no |
+| `bt_waf_logs` | tail `total_logs/<date>/<site>.log` 拦截日志 | no |
 | `bt_waf_block_ip` | btwaf 插件 `add_ip_black`: 单 IP 或 IP 段 (start+end) 加黑名单 | yes |
 | `bt_waf_unblock_ip` | btwaf 插件 `remove_waf_drop_ip`: 解封 IP (覆盖永久 + 临时 CC) | yes |
 
