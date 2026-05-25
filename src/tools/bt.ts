@@ -973,6 +973,25 @@ async function reloadNginx(): Promise<{ ok: boolean; msg: string }> {
   }
 }
 
+// btwaf 插件子动作调用 (面板 → 插件管理 → btwaf 暴露的 API).
+// 不同版本 sub-action 名可能不同, 调用方按需传 s 名.
+async function btWafPluginCall(
+  s: string,
+  extra: Record<string, string | number | undefined>,
+): Promise<{ ok: boolean; data?: unknown; msg: string }> {
+  try {
+    const data = await btRequest({
+      endpoint: '/plugin?action=a',
+      params: { name: 'btwaf', s, ...extra },
+    });
+    const err = isErrorPayload(data);
+    if (err.error) return { ok: false, msg: err.msg };
+    return { ok: true, data, msg: 'ok' };
+  } catch (err) {
+    return { ok: false, msg: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 interface DropIpRecord {
   ip: string;
   ts: number;
@@ -1151,10 +1170,14 @@ registerTool({
   },
 });
 
-// 12. bt_waf_unblock_ip (dangerous)
+// 12. bt_waf_unblock_ip (dangerous) — 双路径: 永久 drop_ip.json + 临时 CC (插件 API)
 registerTool({
   name: 'bt_waf_unblock_ip',
-  description: '从 WAF 永久封禁列表移除 IP 并 reload nginx. 走审批.',
+  description:
+    'WAF 解封 IP. 同时尝试两路: ' +
+    '(1) 移除 drop_ip.json (手动永久封禁); ' +
+    '(2) 调 btwaf 插件 API 解临时封禁 (CC/扫描自动封禁, 存内存 lua-dict, 24h TTL). ' +
+    '两路都失败则提示走面板 UI. 走审批.',
   parameters: {
     type: 'object',
     properties: {
@@ -1172,24 +1195,71 @@ registerTool({
     if (guard) return guard;
     const ip = typeof args.ip === 'string' ? args.ip.trim() : '';
     if (!ip || !isValidIp(ip)) return { ok: false, content: `invalid ip: ${ip}` };
+
+    const report: string[] = [];
+    let anyChange = false;
+
+    // 路径 1: drop_ip.json 永久封禁
     const dropR = await btReadFile(WAF_DROP_IP_JSON);
-    if (!dropR.ok) return { ok: false, content: `读 drop_ip.json 失败: ${dropR.msg}` };
-    const records = parseDropIp(dropR.text);
-    const filtered = records.filter((r) => r.ip !== ip);
-    if (filtered.length === records.length) {
-      return { ok: true, content: `${ip} 不在封禁列表, 无操作` };
+    if (dropR.ok) {
+      const records = parseDropIp(dropR.text);
+      const filtered = records.filter((r) => r.ip !== ip);
+      if (filtered.length < records.length) {
+        const serialized = serializeDropIp(filtered, dropR.text);
+        const writeR = await btWriteFile(WAF_DROP_IP_JSON, serialized);
+        if (writeR.ok) {
+          anyChange = true;
+          report.push(`drop_ip.json: 已移除 ${ip} (剩 ${filtered.length} 条永久封禁)`);
+        } else {
+          report.push(`drop_ip.json: 移除失败 — ${writeR.msg}`);
+        }
+      } else {
+        report.push(`drop_ip.json: ${ip} 不在永久封禁列表`);
+      }
+    } else {
+      report.push(`drop_ip.json: 读失败 — ${dropR.msg}`);
     }
-    const serialized = serializeDropIp(filtered, dropR.text);
-    const writeR = await btWriteFile(WAF_DROP_IP_JSON, serialized);
-    if (!writeR.ok) return { ok: false, content: `写 drop_ip.json 失败: ${writeR.msg}` };
-    const reload = await reloadNginx();
-    if (!reload.ok) {
-      return {
-        ok: false,
-        content: `已写 drop_ip.json 但 reload nginx 失败: ${reload.msg}\n请手动 systemctl reload nginx`,
-      };
+
+    // 路径 2: 插件 API 解临时 (CC/扫描自动封禁)
+    // 不同 btwaf 版本 sub-action 名不同, 顺序尝试.
+    const pluginAttempts: Array<{ s: string; extra: Record<string, string> }> = [
+      { s: 'remove_drop_ip', extra: { ip } },
+      { s: 'del_drop_ip', extra: { ip } },
+      { s: 'unblock_ip', extra: { ip } },
+      { s: 'remove_cc_ip', extra: { ip } },
+      { s: 'del_cc_ip', extra: { ip } },
+      { s: 'clean_ip', extra: { ip } },
+    ];
+    let pluginOk = false;
+    for (const attempt of pluginAttempts) {
+      const r = await btWafPluginCall(attempt.s, attempt.extra);
+      if (r.ok) {
+        // 部分接口即便 IP 不在列表也返 status:true, 还是记录尝试.
+        report.push(`plugin ${attempt.s}: ok — ${JSON.stringify(r.data).slice(0, 200)}`);
+        anyChange = true;
+        pluginOk = true;
+        break;
+      }
+      // 404 / not found / unknown sub-action 这种就继续试下一个; 其他错也记一下
+      if (!/404|not.?found|unknown|illegal|无效/i.test(r.msg)) {
+        report.push(`plugin ${attempt.s}: ${r.msg}`);
+      }
     }
-    return { ok: true, content: `已解封 ${ip} + reload nginx 成功 (剩 ${filtered.length} 条永久封禁)` };
+    if (!pluginOk) {
+      report.push(
+        `plugin API: 所有 sub-action 均失败. 自动 CC 封禁可能需走面板 WAF → 封锁历史 → 解封, 或等 TTL 过期 (默认 24h).`,
+      );
+    }
+
+    if (anyChange) {
+      const reload = await reloadNginx();
+      report.push(reload.ok ? `nginx reload: ok` : `nginx reload: 失败 — ${reload.msg}`);
+    }
+
+    return {
+      ok: anyChange,
+      content: [`# WAF 解封 ${ip}`, ...report].join('\n'),
+    };
   },
 });
 
