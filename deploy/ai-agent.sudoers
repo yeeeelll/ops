@@ -17,7 +17,14 @@ Cmnd_Alias AIOPS_FS_LOCK = __FS_LOCK__
 
 Cmnd_Alias AIOPS_FS_INSPECT = __FS_INSPECT__
 
-__USER__ ALL=(root) NOPASSWD: AIOPS_SERVICES, AIOPS_FS_LOCK, AIOPS_FS_INSPECT
+# P10: firewall_op needs ufw + fail2ban-client. Fixed binary paths.
+Cmnd_Alias AIOPS_FIREWALL = /usr/sbin/ufw, /usr/bin/ufw, /sbin/ufw, /usr/bin/fail2ban-client, /usr/local/bin/fail2ban-client
+
+# P10: process_kill falls back to sudo when targeting root-owned processes.
+# kill itself is a shell builtin in most shells, but execa() spawns /bin/kill.
+Cmnd_Alias AIOPS_KILL = /bin/kill, /usr/bin/kill
+
+__USER__ ALL=(root) NOPASSWD: AIOPS_SERVICES, AIOPS_FS_LOCK, AIOPS_FS_INSPECT, AIOPS_FIREWALL, AIOPS_KILL
 
 # Defaults for safety
 Defaults:__USER__ !requiretty
